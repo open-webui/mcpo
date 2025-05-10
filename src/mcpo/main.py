@@ -117,13 +117,11 @@ async def lifespan(app: FastAPI):
                     yield
 
 
-async def run(
-    host: str = "127.0.0.1",
-    port: int = 8000,
+def create_app(
     api_key: Optional[str] = "",
     cors_allow_origins=["*"],
     **kwargs,
-):
+) -> FastAPI:
     # Server API Key
     api_dependency = get_verify_api_key(api_key) if api_key else None
     strict_auth = kwargs.get("strict_auth", False)
@@ -224,6 +222,18 @@ async def run(
     else:
         raise ValueError("You must provide either server_command or config.")
 
+    return main_app
+
+async def run(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    api_key: Optional[str] = "",
+    cors_allow_origins=["*"],
+    **kwargs,
+):
+    main_app = create_app(api_key=api_key, cors_allow_origins=cors_allow_origins, **kwargs)
+    ssl_certfile = kwargs.get("ssl_certfile")
+    ssl_keyfile = kwargs.get("ssl_keyfile")
     config = uvicorn.Config(
         app=main_app,
         host=host,
