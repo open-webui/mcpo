@@ -52,8 +52,8 @@ def process_tool_response(result: CallToolResult) -> list:
 
 
 def name_needs_alias(name: str) -> bool:
-    """Check if a field name needs aliasing (for now if it starts with '__')."""
-    return name.startswith("__")
+    """Check if a field name needs aliasing (if it starts with '_')."""
+    return name.startswith("_")
 
 
 def generate_alias_name(original_name: str, existing_names: set) -> str:
@@ -61,7 +61,7 @@ def generate_alias_name(original_name: str, existing_names: set) -> str:
     Generate an alias field name by stripping unwanted chars, and avoiding conflicts with existing names.
 
     Args:
-        original_name: The original field name (should start with '__')
+        original_name: The original field name (should start with '_')
         existing_names: Set of existing names to avoid conflicts with
 
     Returns:
@@ -109,7 +109,10 @@ def _process_schema_property(
                 # TODO: Find the exact type hint for the $ref.
                 return Any, Field(default=None, description="")
         ref = ref.split("/")[-1]
-        assert ref in schema_defs, "Custom field not found"
+        if schema_defs is None:
+            # If schema_defs is None, we can't resolve the reference
+            return Any, Field(default=None, description="")
+        assert ref in schema_defs, f"Custom field '{ref}' not found in schema definitions"
         prop_schema = schema_defs[ref]
 
     prop_type = prop_schema.get("type")
@@ -172,19 +175,21 @@ def _process_schema_property(
                 schema_defs,
             )
 
+            # Apply aliasing logic for nested fields as well
+            field_name = name
             if name_needs_alias(name):
                 other_names = set().union(
-                    nested_properties, nested_fields, _model_cache
+                    nested_properties.keys(), nested_fields.keys(), _model_cache.keys()
                 )
-                alias_name = generate_alias_name(name, other_names)
+                field_name = generate_alias_name(name, other_names)
                 aliased_field = Field(
                     default=nested_pydantic_field.default,
                     description=nested_pydantic_field.description,
                     alias=name,
                 )
-                nested_fields[alias_name] = (nested_type_hint, aliased_field)
+                nested_fields[field_name] = (nested_type_hint, aliased_field)
             else:
-                nested_fields[name] = (nested_type_hint, nested_pydantic_field)
+                nested_fields[field_name] = (nested_type_hint, nested_pydantic_field)
 
         if not nested_fields:
             return Dict[str, Any], pydantic_field
@@ -242,9 +247,9 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
             schema_defs,
         )
 
-        # Handle parameter names with leading underscores (e.g., __top, __filter) which Pydantic v2 does not allow
+        # Handle parameter names with leading underscores (e.g., _top, _filter) which Pydantic v2 does not allow
         if name_needs_alias(param_name):
-            other_names = set().union(properties, model_fields, _model_cache)
+            other_names = set().union(properties.keys(), model_fields.keys(), _model_cache.keys())
             alias_name = generate_alias_name(param_name, other_names)
             aliased_field = Field(
                 default=pydantic_field_info.default,
