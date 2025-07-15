@@ -1,0 +1,88 @@
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch-or-sha-commit:
+        description: Branch or full SHA commit
+        required: true
+        type: string
+        default: 'main'
+      environment:
+        description: Environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev-private
+        default: dev-private
+
+jobs:
+  build-and-deploy:
+    runs-on:
+      group: 7908-caasdata
+      labels:
+        - self-hosted
+
+    steps:
+      - name: Load CICD credentials from ASM
+        uses: aws-actions/aws-secretsmanager-get-secrets@v1
+        with:
+          secret-ids: |
+            SECRET, /caas/secret/cicd_creds
+          parse-json-secrets: true
+        env:
+          AWS_REGION: us-west-2
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch-or-sha-commit }}
+
+      - id: katana-auth
+        name: Authenticate with Katana
+        uses: gdcorp-actions/katana-auth@v1
+
+      - id: katana-app
+        name: Get Katana App Info
+        uses: gdcorp-actions/katana-get-app@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        with:
+          mask-password: true
+
+      - name: Build and tag Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.katana-app.outputs.app }}:${{ github.sha }}
+          build-args: |
+            BUILD_HASH=${{ github.sha }}
+
+      - id: katana-publish
+        name: Publish Katana Artifact
+        uses: gdcorp-actions/katana-publish-artifact@v1
+        with:
+          namespace: ${{ steps.katana-app.outputs.namespace }}
+          app: ${{ steps.katana-app.outputs.app }}
+          image_name: ${{ steps.katana-app.outputs.app }}:${{ github.sha }}
+          artifact_kind: ecs
+          artifact_options_json: |
+            {
+              "healthcheckPath": "/healthcheck",
+              "ports": [8443],
+              "protocol": "https"
+            }
+
+      - name: Promote to ${{ github.event.inputs.environment }} environment
+        uses: gdcorp-actions/katana-promote-artifact@v1
+        with:
+          namespace: ${{ steps.katana-app.outputs.namespace }}
+          app: ${{ steps.katana-app.outputs.app }}
+          environment: ${{ github.event.inputs.environment }}
+          artifact_id: ${{ steps.katana-publish.outputs.artifact_id }}
