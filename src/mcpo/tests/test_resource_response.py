@@ -47,7 +47,6 @@ def test_process_resource_response_with_blob_content():
 
 
 def test_process_resource_response_with_blob_content_no_mime_type():
-    # Setup
     blob_content = types.BlobResourceContents(
         uri=AnyUrl(url="example://resource"),
         blob="SGVsbG8sIHdvcmxkIQ==",
