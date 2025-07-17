@@ -46,8 +46,39 @@ def process_tool_response(result: CallToolResult) -> list:
             image_data = f"data:{content.mimeType};base64,{content.data}"
             response.append(image_data)
         elif isinstance(content, types.EmbeddedResource):
-            # TODO: Handle embedded resources
-            response.append("Embedded resource not supported yet.")
+            resource = content.resource
+            if isinstance(resource, types.TextResourceContents):
+                # Process text-based embedded resource
+                resource_data = {
+                    "type": "text_resource",
+                    "uri": str(resource.uri),
+                    "text": resource.text,
+                    "mimeType": resource.mimeType,
+                }
+            elif isinstance(resource, types.BlobResourceContents):
+                # Process binary embedded resource as data URL
+                resource_data = {
+                    "type": "blob_resource",
+                    "uri": str(resource.uri),
+                    "data": f"data:{resource.mimeType or 'application/octet-stream'};base64,{resource.blob}",
+                    "mimeType": resource.mimeType,
+                }
+            else:
+                # Handle unknown resource types gracefully
+                resource_data = {
+                    "type": "unknown_resource",
+                    "error": "Unsupported resource type",
+                }
+
+            # Include annotations if present
+            if content.annotations:
+                resource_data["annotations"] = content.annotations.model_dump()
+
+            # Include metadata if present
+            if content.meta:
+                resource_data["meta"] = content.meta
+
+            response.append(resource_data)
     return response
 
 
