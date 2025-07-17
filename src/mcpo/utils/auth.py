@@ -40,6 +40,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     """
     Middleware that enforces Basic or Bearer token authentication for all requests.
     """
+
     def __init__(self, app, api_key: str):
         super().__init__(app)
         self.api_key = api_key
@@ -59,7 +60,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "Missing or invalid Authorization header"},
-                    headers={"WWW-Authenticate": "Bearer, Basic"}
+                    headers={"WWW-Authenticate": "Bearer, Basic"},
                 )
 
             # Handle Bearer token auth
@@ -67,42 +68,37 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 token = authorization[7:]  # Remove "Bearer " prefix
                 if token != self.api_key:
                     return JSONResponse(
-                        status_code=403,
-                        content={"detail": "Invalid API key"}
+                        status_code=403, content={"detail": "Invalid API key"}
                     )
             # Handle Basic auth
             elif authorization.startswith("Basic "):
                 # Decode the base64 credentials
                 credentials = authorization[6:]  # Remove "Basic " prefix
                 try:
-                    decoded = base64.b64decode(credentials).decode('utf-8')
+                    decoded = base64.b64decode(credentials).decode("utf-8")
                     # Basic auth format is username:password
-                    username, password = decoded.split(':', 1)
+                    username, password = decoded.split(":", 1)
                     # Any username is allowed, but password must match api_key
                     if password != self.api_key:
                         return JSONResponse(
-                            status_code=403,
-                            content={"detail": "Invalid credentials"}
+                            status_code=403, content={"detail": "Invalid credentials"}
                         )
                 except Exception:
                     return JSONResponse(
                         status_code=401,
                         content={"detail": "Invalid Basic Authentication format"},
-                        headers={"WWW-Authenticate": "Bearer, Basic"}
+                        headers={"WWW-Authenticate": "Bearer, Basic"},
                     )
             else:
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "Unsupported authorization method"},
-                    headers={"WWW-Authenticate": "Bearer, Basic"}
+                    headers={"WWW-Authenticate": "Bearer, Basic"},
                 )
 
             return await call_next(request)
         except Exception as e:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": str(e)}
-            )
+            return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
 # def create_token(data: dict, expires_delta: Union[timedelta, None] = None) -> str:

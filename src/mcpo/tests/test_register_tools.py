@@ -313,14 +313,14 @@ def test_multi_type_property_with_any_of():
 
 
 def test_ref_to_parent_node():
-    schema = {'$ref': '#/properties/data/properties/children/items'}
+    schema = {"$ref": "#/properties/data/properties/children/items"}
     result_type, result_field = _process_schema_property(
         _model_cache,
         schema,
         "generate_fishbone_diagram_form_model_data_model_children_item_model_children",
         "item",
         False,
-        {}
+        {},
     )
 
     assert result_type == Any
