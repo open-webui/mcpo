@@ -19,6 +19,8 @@ from mcp.shared.exceptions import McpError
 from pydantic import Field, create_model
 from pydantic.fields import FieldInfo
 
+from mcpo.utils.resource_handler import register_base64_image
+
 MCP_ERROR_TO_HTTP_STATUS = {
     PARSE_ERROR: 400,
     INVALID_REQUEST: 400,
@@ -43,8 +45,12 @@ def process_tool_response(result: CallToolResult) -> list:
                     pass
             response.append(text)
         elif isinstance(content, types.ImageContent):
-            image_data = f"data:{content.mimeType};base64,{content.data}"
-            response.append(image_data)
+            resource_uri = register_base64_image(content.mimeType, content.data)
+            response.append({
+                "type": "image",
+                "uri": resource_uri,
+                "mimeType": content.mimeType
+            })
         elif isinstance(content, types.EmbeddedResource):
             # TODO: Handle embedded resources
             response.append("Embedded resource not supported yet.")

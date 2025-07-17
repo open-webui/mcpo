@@ -17,6 +17,8 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from starlette.routing import Mount
 
+from mcpo.utils.resource_handler import setup_resource_routes
+
 logger = logging.getLogger(__name__)
 
 
@@ -396,7 +398,10 @@ async def run(
     else:
         logger.error("MCPO server_command or config_path must be provided.")
         raise ValueError("You must provide either server_command or config.")
-
+    
+    # Add resource route
+    setup_resource_routes(main_app)
+    
     logger.info("Uvicorn server starting...")
     config = uvicorn.Config(
         app=main_app,
