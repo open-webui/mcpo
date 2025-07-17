@@ -5,6 +5,7 @@ from fastapi.params import Depends
 from mcp import ClientSession, ReadResourceResult
 from pydantic import AnyUrl
 
+from mcpo.utils.resource_response import process_resource_response
 from mcpo.utils.routes import convert_to_route
 
 
@@ -25,7 +26,8 @@ async def register_resources(app: FastAPI, session: ClientSession, dependencies:
 
 
 def create_resource_handler(session: ClientSession, url: str):
-    async def _handler() -> ReadResourceResult:
-        return await session.read_resource(uri=AnyUrl(url=url))
+    async def _handler():
+        resource_response = await session.read_resource(uri=AnyUrl(url=url))
+        return process_resource_response(resource_response)
 
     return _handler
