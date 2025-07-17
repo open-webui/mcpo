@@ -60,7 +60,15 @@ async def test_register_resource_templates(mock_app, mock_session, mock_dependen
     assert mock_session.list_resource_templates.called
     assert mock_app.get.call_count == len(mock_resource_templates)
 
-    assert mock_app.get.call_count == len(mock_resource_templates)
+    for i, resource in enumerate(mock_resource_templates):
+        call_args = mock_app.get.call_args_list[i][0]
+        call_kwargs = mock_app.get.call_args_list[i][1]
+
+        assert call_args[0].startswith("/resource/{resource_id}")
+
+        assert call_kwargs["summary"] == resource.name.replace("_", " ").title()
+        assert call_kwargs["description"] == resource.description
+        assert call_kwargs["dependencies"] == mock_dependencies
 
 
 @pytest.mark.asyncio

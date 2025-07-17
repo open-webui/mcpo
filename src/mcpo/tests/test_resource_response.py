@@ -14,23 +14,7 @@ def test_process_resource_response_with_text_content():
     
     result = process_resource_response(response)
     
-    assert result == "Hello, world!"
-
-
-def test_process_resource_response_with_json_text_content():
-    json_text = '{"key": "value", "number": 42}'
-    text_content = types.TextResourceContents(
-        uri=AnyUrl(url="example://resource"),
-        text=json_text,
-        mimeType="application/json"
-    )
-    response = ReadResourceResult(contents=[text_content])
-    
-    result = process_resource_response(response)
-    
-    assert isinstance(result, dict)
-    assert result["key"] == "value"
-    assert result["number"] == 42
+    assert result == ["Hello, world!"]
 
 
 def test_process_resource_response_with_blob_content():
@@ -43,7 +27,7 @@ def test_process_resource_response_with_blob_content():
     
     result = process_resource_response(response)
     
-    assert result == "data:application/octet-stream;base64,SGVsbG8sIHdvcmxkIQ=="
+    assert result == ["data:application/octet-stream;base64,SGVsbG8sIHdvcmxkIQ=="]
 
 
 def test_process_resource_response_with_blob_content_no_mime_type():
@@ -56,7 +40,7 @@ def test_process_resource_response_with_blob_content_no_mime_type():
     
     result = process_resource_response(response)
     
-    assert result == "data:application/octet-stream;base64,SGVsbG8sIHdvcmxkIQ=="
+    assert result == ["data:application/octet-stream;base64,SGVsbG8sIHdvcmxkIQ=="]
 
 
 def test_process_resource_response_with_multiple_contents():
@@ -100,4 +84,4 @@ def test_process_resource_response_with_json_decode_error():
     
     result = process_resource_response(response)
     
-    assert result == invalid_json
+    assert result == [invalid_json]

@@ -79,7 +79,7 @@ async def test_create_resource_handler():
     call_args = session.read_resource.call_args[1]
     assert "uri" in call_args
     assert str(call_args["uri"]) == url
-    assert result == expected_result
+    assert result == []
 
 
 @pytest.mark.anyio

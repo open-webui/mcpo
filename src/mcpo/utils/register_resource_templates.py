@@ -19,11 +19,15 @@ async def register_resource_templates(app: FastAPI, session: ClientSession, depe
         endpoint_name = resource_template.name
         endpoint_description = resource_template.description
         uri = resource_template.uriTemplate
-        # URI templates are not valid URLs, so we need to handle them differently
-        parsed_uri = uri
-        _,_,convertors = compile_path(parsed_uri)
+        parsed_uri = convert_to_route(AnyUrl(uri))
+        _, _, convertors = compile_path(parsed_uri)
 
-        app.get(parsed_uri, summary=endpoint_name.replace("_", " ").title(), description=endpoint_description, dependencies=dependencies)(create_resource_handler(session, uri, convertors))
+        app.get(
+            parsed_uri,
+            summary=endpoint_name.replace("_", " ").title(),
+            description=endpoint_description,
+            dependencies=dependencies,
+        )(create_resource_handler(session, uri, convertors))
 
 
 def create_resource_handler(session: ClientSession, url: str, convertors: dict[str, Convertor]):
