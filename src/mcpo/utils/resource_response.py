@@ -23,6 +23,4 @@ def process_resource_response(response: ReadResourceResult) -> list:
             blob_data = f"data:{content.mimeType or 'application/octet-stream'};base64,{content.blob}"
             response_list.append(blob_data)
 
-    if not response_list:
-        return response_list
-    return response_list if len(response_list) > 1 else response_list[0]
+    return response_list
