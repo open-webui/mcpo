@@ -9,16 +9,24 @@ from typing import Optional
 import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mcp import ClientSession, StdioServerParameters
+from mcp import (
+    ClientSession,
+    StdioServerParameters,
+)
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from starlette.routing import Mount
 
+from mcpo.utils.register_resource_templates import register_resource_templates
+from mcpo.utils.register_resources import register_resources
+
 logger = logging.getLogger(__name__)
 
 
-from mcpo.utils.main import get_model_fields, get_tool_handler
+from mcpo.utils.register_tools import (
+    register_tools,
+)
 from mcpo.utils.auth import get_verify_api_key, APIKeyMiddleware
 
 
@@ -40,47 +48,11 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
     if instructions:
         app.description = instructions
 
-    tools_result = await session.list_tools()
-    tools = tools_result.tools
+    dependencies = [Depends(api_dependency)] if api_dependency else []
 
-    for tool in tools:
-        endpoint_name = tool.name
-        endpoint_description = tool.description
-
-        inputSchema = tool.inputSchema
-        outputSchema = getattr(tool, "outputSchema", None)
-
-        form_model_fields = get_model_fields(
-            f"{endpoint_name}_form_model",
-            inputSchema.get("properties", {}),
-            inputSchema.get("required", []),
-            inputSchema.get("$defs", {}),
-        )
-
-        response_model_fields = None
-        if outputSchema:
-            response_model_fields = get_model_fields(
-                f"{endpoint_name}_response_model",
-                outputSchema.get("properties", {}),
-                outputSchema.get("required", []),
-                outputSchema.get("$defs", {}),
-            )
-
-        tool_handler = get_tool_handler(
-            session,
-            endpoint_name,
-            form_model_fields,
-            response_model_fields,
-        )
-
-        app.post(
-            f"/{endpoint_name}",
-            summary=endpoint_name.replace("_", " ").title(),
-            description=endpoint_description,
-            response_model_exclude_none=True,
-            dependencies=[Depends(api_dependency)] if api_dependency else [],
-        )(tool_handler)
-
+    await register_tools(app, session, dependencies)
+    await register_resource_templates(app, session, dependencies)
+    await register_resources(app, session, dependencies)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -2,7 +2,8 @@ import json
 import traceback
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
 import logging
-from fastapi import HTTPException
+from fastapi import HTTPException, FastAPI
+from fastapi.params import Depends
 
 from mcp import ClientSession, types
 from mcp.types import (
@@ -28,6 +29,48 @@ MCP_ERROR_TO_HTTP_STATUS = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+async def register_tools(app: FastAPI, session: ClientSession, dependencies: list[Depends]):
+    tools_result = await session.list_tools()
+    tools = tools_result.tools
+    for tool in tools:
+        endpoint_name = tool.name
+        endpoint_description = tool.description
+
+        inputSchema = tool.inputSchema
+        outputSchema = getattr(tool, "outputSchema", None)
+
+        form_model_fields = get_model_fields(
+            f"{endpoint_name}_form_model",
+            inputSchema.get("properties", {}),
+            inputSchema.get("required", []),
+            inputSchema.get("$defs", {}),
+        )
+
+        response_model_fields = None
+        if outputSchema:
+            response_model_fields = get_model_fields(
+                f"{endpoint_name}_response_model",
+                outputSchema.get("properties", {}),
+                outputSchema.get("required", []),
+                outputSchema.get("$defs", {}),
+            )
+
+        tool_handler = get_tool_handler(
+            session,
+            endpoint_name,
+            form_model_fields,
+            response_model_fields,
+        )
+
+        app.post(
+            f"/{endpoint_name}",
+            summary=endpoint_name.replace("_", " ").title(),
+            description=endpoint_description,
+            response_model_exclude_none=True,
+            dependencies=dependencies,
+        )(tool_handler)
 
 
 def process_tool_response(result: CallToolResult) -> list:
