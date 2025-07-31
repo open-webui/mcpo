@@ -16,7 +16,7 @@ and this project adheres to Semantic Versioning.
 
 ### Added
 
-- 🔄 **Hot Reload Support for Configuration Files**: Added `--hot-reload` flag to watch your config file for changes and dynamically reload MCP servers without restarting the application—enabling seamless development workflows and runtime configuration updates.
+- 🔄 **Hot Reload Support for Configuration Files**: Added \`--hot-reload\` flag to watch your config file for changes and dynamically reload MCP servers without restarting the application—enabling seamless development workflows and runtime configuration updates.
 - 🤫 **HTTP Request Filtering for Cleaner Logs**: Added configurable log filtering to reduce noise from frequent HTTP requests, making debugging and monitoring much clearer in production environments.
 
 ### Changed
