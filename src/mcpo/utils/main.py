@@ -143,7 +143,12 @@ def _process_schema_property(
             temp_schema = dict(prop_schema)
             temp_schema["type"] = type_option
             type_hint, _ = _process_schema_property(
-                _model_cache, temp_schema, model_name_prefix, prop_name, False
+                _model_cache,
+                temp_schema,
+                model_name_prefix,
+                prop_name,
+                False,
+                schema_defs=schema_defs,
             )
             type_hints.append(type_hint)
 
