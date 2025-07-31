@@ -131,8 +131,6 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
         sub_app.state.headers = server_cfg.get("headers")
     elif normalize_server_type(server_config_type) == "streamable-http" and server_cfg.get("url"):
         url = server_cfg["url"]
-        if not url.endswith("/"):
-            url = f"{url}/"
         sub_app.state.server_type = "streamablehttp"
         sub_app.state.args = [url]
         sub_app.state.headers = server_cfg.get("headers")

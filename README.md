@@ -76,12 +76,20 @@ That’s it. Your MCP tool is now available at http://localhost:8000 with a gene
 
 ### 🔄 Using a Config File
 
-You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format:
+You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
+
+Enable hot-reload mode with `--hot-reload` to automatically watch your config file for changes and reload servers without downtime:
 
 Start via:
 
 ```bash
 mcpo --config /path/to/config.json
+```
+
+Or with hot-reload enabled:
+
+```bash
+mcpo --config /path/to/config.json --hot-reload
 ```
 
 Example config.json:
