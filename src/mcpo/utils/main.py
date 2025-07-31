@@ -129,6 +129,7 @@ def _process_schema_property(
                 f"{model_name_prefix}_{prop_name}",
                 f"choice_{i}",
                 False,
+                schema_defs=schema_defs,
             )
             type_hints.append(type_hint)
         return Union[tuple(type_hints)], pydantic_field
