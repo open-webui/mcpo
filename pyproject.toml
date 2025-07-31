@@ -1,6 +1,6 @@
 [project]
 name = "mcpo"
-version = "0.0.16"
+version = "0.0.17"
 description = "A simple, secure MCP-to-OpenAPI proxy server"
 authors = [
     { name = "Timothy Jaeryang Baek", email = "tim@openwebui.com" }

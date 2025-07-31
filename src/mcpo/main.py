@@ -351,10 +351,27 @@ async def lifespan(app: FastAPI):
                             f"Connection attempt for '{server_name}' finished, but status is not 'connected'."
                         )
                         failed_servers.append(server_name)
-                except Exception:
-                    logger.error(
-                        f"Failed to establish connection for server: '{server_name}'."
-                    )
+                except Exception as e:
+                    error_class_name = type(e).__name__
+                    if error_class_name == 'ExceptionGroup' or (hasattr(e, 'exceptions') and hasattr(e, 'message')):
+                        logger.error(
+                            f"Failed to establish connection for server: '{server_name}' - Multiple errors occurred:"
+                        )
+                        # Log each individual exception from the group
+                        exceptions = getattr(e, 'exceptions', [])
+                        for idx, exc in enumerate(exceptions):
+                            logger.error(f"  Error {idx + 1}: {type(exc).__name__}: {exc}")
+                            # Also log traceback for each exception
+                            if hasattr(exc, '__traceback__'):
+                                import traceback
+                                tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+                                for line in tb_lines:
+                                    logger.debug(f"    {line.rstrip()}")
+                    else:
+                        logger.error(
+                            f"Failed to establish connection for server: '{server_name}' - {type(e).__name__}: {e}",
+                            exc_info=True
+                        )
                     failed_servers.append(server_name)
 
             logger.info("\n--- Server Startup Summary ---")
@@ -409,9 +426,11 @@ async def lifespan(app: FastAPI):
                     app.state.is_connected = True
                     yield
         except Exception as e:
-            logger.error(f"Failed to connect to MCP server '{app.title}': {e}")
+            # Log the full exception with traceback for debugging
+            logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
             app.state.is_connected = False
-            return
+            # Re-raise the exception so it propagates to the main app's lifespan
+            raise
 
 
 async def run(
