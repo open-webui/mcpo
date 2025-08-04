@@ -463,6 +463,7 @@ async def run(
     ssl_certfile = kwargs.get("ssl_certfile")
     ssl_keyfile = kwargs.get("ssl_keyfile")
     path_prefix = kwargs.get("path_prefix") or "/"
+    root_path = kwargs.get("root_path") or ""
 
     # Configure basic logging
     logging.basicConfig(
@@ -500,6 +501,7 @@ async def run(
         title=name,
         description=description,
         version=version,
+        root_path=root_path,
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
         lifespan=lifespan,
