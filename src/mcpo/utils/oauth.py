@@ -53,9 +53,10 @@ def _load_callback_html(status: str, title: str, heading: str, message: str, act
         return f"<html><body><h2>{heading}</h2><p>{message}</p></body></html>"
 
 class InMemoryTokenStorage(TokenStorage):
-    """Simple in-memory token storage per server instance"""
-    def __init__(self, server_name: str):
+    """Simple in-memory token storage per server instance with user isolation"""
+    def __init__(self, server_name: str, user_id: str = None):
         self.server_name = server_name
+        self.user_id = user_id or "default"
         self.tokens: Optional[OAuthToken] = None
         self.client_info: Optional[OAuthClientInformationFull] = None
         
@@ -64,7 +65,7 @@ class InMemoryTokenStorage(TokenStorage):
         
     async def set_tokens(self, tokens: OAuthToken) -> None:
         self.tokens = tokens
-        logger.info(f"OAuth tokens stored for server: {self.server_name}")
+        logger.info(f"OAuth tokens stored for server: {self.server_name}, user: {self.user_id}")
         
     async def get_client_info(self) -> Optional[OAuthClientInformationFull]:
         return self.client_info
@@ -74,11 +75,15 @@ class InMemoryTokenStorage(TokenStorage):
 
 
 class FileTokenStorage(TokenStorage):
-    """File-based token storage with per-server isolation"""
-    def __init__(self, server_name: str, storage_dir: str = None):
+    """File-based token storage with per-server and per-user isolation"""
+    def __init__(self, server_name: str, user_id: str = None, storage_dir: str = None):
         self.server_name = server_name
-        # Use hash of server name to avoid filesystem issues
-        safe_name = hashlib.md5(server_name.encode()).hexdigest()[:8]
+        self.user_id = user_id or "default"
+        
+        # Create unique identifier combining server and user
+        combined_id = f"{server_name}_{self.user_id}"
+        safe_name = hashlib.md5(combined_id.encode()).hexdigest()[:12]
+        
         if storage_dir is None:
             storage_dir = os.path.expanduser("~/.mcpo/tokens")
         self.storage_dir = Path(storage_dir)
@@ -100,7 +105,7 @@ class FileTokenStorage(TokenStorage):
         try:
             with open(self.token_file, 'w') as f:
                 json.dump(tokens.model_dump(mode='json'), f)
-            logger.info(f"OAuth tokens persisted for server: {self.server_name}")
+            logger.info(f"OAuth tokens persisted for server: {self.server_name}, user: {self.user_id}")
         except Exception as e:
             logger.error(f"Failed to save tokens for {self.server_name}: {e}")
             
@@ -216,7 +221,8 @@ class CallbackServer:
 async def create_oauth_provider(
     server_name: str,
     oauth_config: Dict[str, Any],
-    storage_type: str = "file"
+    storage_type: str = "file",
+    user_id: str = None
 ) -> OAuthClientProvider:
     """Create an OAuth provider for a server"""
     
@@ -246,11 +252,11 @@ async def create_oauth_provider(
     
     client_metadata = OAuthClientMetadata.model_validate(metadata_dict)
     
-    # Choose storage backend
+    # Choose storage backend with user isolation
     if storage_type == "memory":
-        storage = InMemoryTokenStorage(server_name)
+        storage = InMemoryTokenStorage(server_name, user_id)
     else:
-        storage = FileTokenStorage(server_name)
+        storage = FileTokenStorage(server_name, user_id)
     
     # Setup callback handling
     use_loopback = oauth_config.get("use_loopback", True)

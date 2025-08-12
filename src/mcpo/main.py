@@ -28,6 +28,8 @@ from mcpo.utils.main import get_model_fields, get_tool_handler
 from mcpo.utils.auth import get_verify_api_key, APIKeyMiddleware
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.utils.oauth import create_oauth_provider
+from mcpo.utils.session_manager import UserSessionManager
+from mcpo.utils.oauth_middleware import MultiUserOAuthMiddleware
 
 
 logger = logging.getLogger(__name__)
@@ -400,69 +402,56 @@ async def lifespan(app: FastAPI):
             # The AsyncExitStack will handle the graceful shutdown of all servers
             # when the 'with' block is exited.
     else:
-        # This is a sub-app's lifespan
+        # This is a sub-app's lifespan - for multi-user OAuth, we defer connection to per-request
         app.state.is_connected = False
-        try:
-            # Check for OAuth configuration
-            oauth_config = getattr(app.state, "oauth_config", None)
-            auth_provider = None
-            
-            if oauth_config:
-                server_name = app.title
-                logger.info(f"OAuth configuration detected for server: {server_name}")
-                try:
-                    auth_provider = await create_oauth_provider(
-                        server_name=server_name,
-                        oauth_config=oauth_config,
-                        storage_type=oauth_config.get("storage_type", "file")
+        oauth_config = getattr(app.state, "oauth_config", None)
+        
+        if oauth_config:
+            # OAuth-enabled server - don't create connections during startup
+            # Mark as OAuth-ready and defer actual connection to user requests
+            server_name = app.title
+            logger.info(f"OAuth-enabled server ready: {server_name} (connections will be created per user)")
+            app.state.is_oauth_enabled = True
+            app.state.is_connected = True  # Mark as ready to receive requests
+            yield
+        else:
+            # Non-OAuth server - create connection immediately as before
+            try:
+                if server_type == "stdio":
+                    server_params = StdioServerParameters(
+                        command=command,
+                        args=args,
+                        env={**os.environ, **env},
                     )
-                    logger.info(f"OAuth provider created for server: {server_name}")
-                except Exception as e:
-                    logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
-                    raise
-            
-            if server_type == "stdio":
-                # stdio doesn't support OAuth authentication
-                if oauth_config:
-                    logger.warning(f"OAuth not supported for stdio server type")
-                server_params = StdioServerParameters(
-                    command=command,
-                    args=args,
-                    env={**os.environ, **env},
-                )
-                client_context = stdio_client(server_params)
-            elif server_type == "sse":
-                # SSE doesn't support OAuth authentication currently
-                if oauth_config:
-                    logger.warning(f"OAuth not supported for SSE server type")
-                headers = getattr(app.state, "headers", None)
-                client_context = sse_client(
-                    url=args[0],
-                    sse_read_timeout=connection_timeout or 900,
-                    headers=headers,
-                )
-            elif server_type == "streamable-http":
-                headers = getattr(app.state, "headers", None)
-                client_context = streamablehttp_client(
-                    url=args[0], 
-                    headers=headers,
-                    auth=auth_provider,  # Pass OAuth provider if configured
-                )
-            else:
-                raise ValueError(f"Unsupported server type: {server_type}")
+                    client_context = stdio_client(server_params)
+                elif server_type == "sse":
+                    headers = getattr(app.state, "headers", None)
+                    client_context = sse_client(
+                        url=args[0],
+                        sse_read_timeout=connection_timeout or 900,
+                        headers=headers,
+                    )
+                elif server_type == "streamable-http":
+                    headers = getattr(app.state, "headers", None)
+                    client_context = streamablehttp_client(
+                        url=args[0], 
+                        headers=headers,
+                    )
+                else:
+                    raise ValueError(f"Unsupported server type: {server_type}")
 
-            async with client_context as (reader, writer, *_):
-                async with ClientSession(reader, writer) as session:
-                    app.state.session = session
-                    await create_dynamic_endpoints(app, api_dependency=api_dependency)
-                    app.state.is_connected = True
-                    yield
-        except Exception as e:
-            # Log the full exception with traceback for debugging
-            logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
-            app.state.is_connected = False
-            # Re-raise the exception so it propagates to the main app's lifespan
-            raise
+                async with client_context as (reader, writer, *_):
+                    async with ClientSession(reader, writer) as session:
+                        app.state.session = session
+                        await create_dynamic_endpoints(app, api_dependency=api_dependency)
+                        app.state.is_connected = True
+                        yield
+            except Exception as e:
+                # Log the full exception with traceback for debugging
+                logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
+                app.state.is_connected = False
+                # Re-raise the exception so it propagates to the main app's lifespan
+                raise
 
 
 async def run(
@@ -528,6 +517,9 @@ async def run(
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()
 
+    # Create session manager for multi-user OAuth
+    session_manager = UserSessionManager(session_timeout_minutes=30)
+    
     main_app = FastAPI(
         title=name,
         description=description,
@@ -540,6 +532,7 @@ async def run(
     # Pass shutdown handler to app state
     main_app.state.shutdown_handler = shutdown_handler
     main_app.state.path_prefix = path_prefix
+    main_app.state.session_manager = session_manager
 
     main_app.add_middleware(
         CORSMiddleware,
@@ -548,6 +541,9 @@ async def run(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Add OAuth middleware for multi-user authentication
+    main_app.add_middleware(MultiUserOAuthMiddleware, session_manager=session_manager)
 
     # Add middleware to protect also documentation and spec
     if api_key and strict_auth:
@@ -589,6 +585,11 @@ async def run(
     elif config_path:
         logger.info(f"Loading MCP server configurations from: {config_path}")
         config_data = load_config(config_path)
+        
+        # Configure session manager with server configs for OAuth
+        mcp_servers = config_data.get("mcpServers", {})
+        session_manager.set_server_configs(mcp_servers)
+        
         mount_config_servers(
             main_app, config_data, cors_allow_origins, api_key, strict_auth,
             api_dependency, connection_timeout, lifespan, path_prefix
@@ -690,6 +691,10 @@ async def run(
         # Wait for all tasks to complete
         if shutdown_handler.tasks:
             await asyncio.gather(*shutdown_handler.tasks, return_exceptions=True)
+            
+        # Shutdown session manager
+        if hasattr(main_app.state, 'session_manager'):
+            await main_app.state.session_manager.shutdown()
 
     except SystemExit:
         # Re-raise SystemExit to allow proper program termination
