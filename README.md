@@ -127,6 +127,62 @@ Each tool will be accessible under its own unique route, e.g.:
 
 Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
 
+### 🔐 OAuth 2.1 Authentication
+
+mcpo supports OAuth 2.1 authentication for MCP servers that require it. Add an `oauth` section to any server in your config:
+
+```json
+{
+  "mcpServers": {
+    "oauth-protected-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000",
+        "storage_type": "file"  // Tokens persist between restarts
+      }
+    }
+  }
+}
+```
+
+#### OAuth Configuration Options
+
+- `server_url` (required): OAuth server base URL
+- `storage_type`: "file" (persistent) or "memory" (session-only)
+- `callback_port`: Local port for OAuth callback (default: 3030)
+- `use_loopback`: Auto-open browser for auth (default: true)
+
+#### Full OAuth Example with Custom Client
+
+```json
+{
+  "mcpServers": {
+    "my-oauth-server": {
+      "type": "streamable-http",
+      "url": "http://api.example.com/mcp",
+      "oauth": {
+        "server_url": "http://api.example.com",
+        "storage_type": "file",
+        "client_metadata": {
+          "client_name": "My MCPO Client",
+          "scope": "read write",
+          "redirect_uris": ["http://localhost:3030/callback"]
+        }
+      }
+    }
+  }
+}
+```
+
+On first connection, mcpo will:
+1. Open your browser for authorization
+2. Capture the OAuth callback automatically
+3. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
+4. Use tokens for all subsequent requests
+
+OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
+
 ## 🔧 Requirements
 
 - Python 3.8+
