@@ -168,7 +168,7 @@ async def create_oauth_provider(
     if not server_url:
         raise ValueError(f"OAuth server_url required for {server_name}")
         
-    # Build client metadata
+    # Build client metadata - only set defaults for required fields
     metadata_dict = oauth_config.get("client_metadata", {})
     if not metadata_dict.get("client_name"):
         metadata_dict["client_name"] = f"MCPO Client for {server_name}"
@@ -179,6 +179,9 @@ async def create_oauth_provider(
         metadata_dict["grant_types"] = ["authorization_code", "refresh_token"]
     if not metadata_dict.get("response_types"):
         metadata_dict["response_types"] = ["code"]
+        
+    # Don't set scope by default - let dynamic registration handle it
+    # Don't set authorization_endpoint or token_endpoint - these are discovered
         
     # Convert redirect_uris to AnyUrl
     redirect_uris = [AnyUrl(uri) for uri in metadata_dict["redirect_uris"]]

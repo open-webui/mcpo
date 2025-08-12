@@ -129,7 +129,7 @@ Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at
 
 ### 🔐 OAuth 2.1 Authentication
 
-mcpo supports OAuth 2.1 authentication for MCP servers that require it. Add an `oauth` section to any server in your config:
+mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
 
 ```json
 {
@@ -138,8 +138,7 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. Add an `
       "type": "streamable-http",
       "url": "http://localhost:8000/mcp",
       "oauth": {
-        "server_url": "http://localhost:8000",
-        "storage_type": "file"  // Tokens persist between restarts
+        "server_url": "http://localhost:8000"
       }
     }
   }
@@ -148,25 +147,25 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. Add an `
 
 #### OAuth Configuration Options
 
+**Basic Options:**
 - `server_url` (required): OAuth server base URL
-- `storage_type`: "file" (persistent) or "memory" (session-only)
+- `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
 - `callback_port`: Local port for OAuth callback (default: 3030)
 - `use_loopback`: Auto-open browser for auth (default: true)
 
-#### Full OAuth Example with Custom Client
+**Advanced Options (rarely needed):**
+For servers that don't support dynamic client registration, you can specify static client metadata:
 
 ```json
 {
   "mcpServers": {
-    "my-oauth-server": {
-      "type": "streamable-http",
+    "legacy-oauth-server": {
+      "type": "streamable-http", 
       "url": "http://api.example.com/mcp",
       "oauth": {
         "server_url": "http://api.example.com",
-        "storage_type": "file",
         "client_metadata": {
           "client_name": "My MCPO Client",
-          "scope": "read write",
           "redirect_uris": ["http://localhost:3030/callback"]
         }
       }
@@ -175,11 +174,14 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. Add an `
 }
 ```
 
+> **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
+
 On first connection, mcpo will:
-1. Open your browser for authorization
-2. Capture the OAuth callback automatically
-3. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
-4. Use tokens for all subsequent requests
+1. Perform dynamic client registration (if supported)
+2. Open your browser for authorization
+3. Capture the OAuth callback automatically  
+4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
+5. Use tokens for all subsequent requests
 
 OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
 
