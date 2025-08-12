@@ -17,6 +17,41 @@ from pydantic import AnyUrl
 
 logger = logging.getLogger(__name__)
 
+def _load_callback_html(status: str, title: str, heading: str, message: str, action_text: str) -> str:
+    """Load and render the OAuth callback HTML template"""
+    template_path = Path(__file__).parent / "oauth_callback.html"
+    
+    try:
+        logger.debug(f"Loading OAuth template from: {template_path}")
+        logger.debug(f"Template exists: {template_path.exists()}")
+        
+        with open(template_path, 'r', encoding='utf-8') as f:
+            template = f.read()
+        
+        logger.debug(f"Template loaded, length: {len(template)}")
+        
+        # Define icons and status classes
+        icon = "✓" if status == "success" else "✕"
+        status_class = status
+        
+        # Replace template variables
+        html = template.format(
+            title=title,
+            status_class=status_class,
+            icon=icon,
+            heading=heading,
+            message=message,
+            action_text=action_text
+        )
+        
+        logger.debug("Template rendered successfully")
+        return html
+    except Exception as e:
+        logger.error(f"Failed to load OAuth callback template from {template_path}: {e}")
+        logger.error(f"Template path exists: {template_path.exists()}")
+        # Fallback to simple HTML
+        return f"<html><body><h2>{heading}</h2><p>{message}</p></body></html>"
+
 class InMemoryTokenStorage(TokenStorage):
     """Simple in-memory token storage per server instance"""
     def __init__(self, server_name: str):
@@ -99,15 +134,37 @@ class CallbackHandler(BaseHTTPRequestHandler):
             self.data["authorization_code"] = q["code"][0]
             self.data["state"] = q.get("state", [None])[0]
             self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            self.wfile.write(b"<html><body><h2>Authorization successful!</h2><p>You can close this tab.</p></body></html>")
+            
+            html = _load_callback_html(
+                status="success",
+                title="Authorization Successful - MCPO",
+                heading="Authorization Successful!",
+                message="Your OAuth authorization was completed successfully. The application can now access the requested resources.",
+                action_text="You can safely close this browser tab and return to your application."
+            )
+            self.wfile.write(html.encode('utf-8'))
+            
         elif "error" in q:
+            error_desc = q.get("error_description", [q["error"][0]])[0]
             self.data["error"] = q["error"][0]
             self.send_response(400)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            self.wfile.write(b"<html><body><h2>Authorization failed</h2><p>Check the logs for details.</p></body></html>")
+            
+            html = _load_callback_html(
+                status="error",
+                title="Authorization Failed - MCPO",
+                heading="Authorization Failed",
+                message=f"The OAuth authorization process encountered an error: {error_desc}",
+                action_text="Please close this tab and check the application logs for more details."
+            )
+            self.wfile.write(html.encode('utf-8'))
+            
         else:
             self.send_response(404)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             
     def log_message(self, *_):
