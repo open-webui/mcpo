@@ -222,7 +222,8 @@ async def create_oauth_provider(
     server_name: str,
     oauth_config: Dict[str, Any],
     storage_type: str = "file",
-    user_id: str = None
+    user_id: str = None,
+    mcpo_port: int = 8000
 ) -> OAuthClientProvider:
     """Create an OAuth provider for a server"""
     
@@ -236,8 +237,8 @@ async def create_oauth_provider(
     if not metadata_dict.get("client_name"):
         metadata_dict["client_name"] = f"MCPO Client for {server_name}"
     if not metadata_dict.get("redirect_uris"):
-        callback_port = oauth_config.get("callback_port", 3030)
-        metadata_dict["redirect_uris"] = [f"http://localhost:{callback_port}/callback"]
+        # Use MCPO's OAuth callback endpoint instead of local callback server
+        metadata_dict["redirect_uris"] = [f"http://localhost:{mcpo_port}/oauth/{server_name}/callback"]
     if not metadata_dict.get("grant_types"):
         metadata_dict["grant_types"] = ["authorization_code", "refresh_token"]
     if not metadata_dict.get("response_types"):
