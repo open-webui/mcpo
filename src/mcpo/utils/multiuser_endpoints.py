@@ -126,7 +126,37 @@ class MultiUserEndpointManager:
         async with client_context as (reader, writer, *_):
             async with ClientSession(reader, writer) as session:
                 # Initialize the session first
-                await session.initialize()
+                try:
+                    await session.initialize()
+                except (httpx.HTTPStatusError, Exception) as e:
+                    # Check if this is a 401 error indicating invalid token
+                    is_401_error = False
+                    if isinstance(e, httpx.HTTPStatusError):
+                        is_401_error = e.response.status_code == 401
+                    else:
+                        error_msg = str(e).lower()
+                        is_401_error = "401" in error_msg or "unauthorized" in error_msg
+                        
+                    if is_401_error:
+                        logger.warning(f"Token authentication failed during tool execution (401), clearing authentication state: {e}")
+                        # Clear authentication state for this user/server
+                        await oauth_manager.clear_user_session_auth(request, server_name)
+                        # Also clear the endpoint manager's cache
+                        await self.clear_user_session_cache(user_id, server_name)
+                        
+                        # Re-raise as authentication required error
+                        raise HTTPException(
+                            status_code=401,
+                            detail={
+                                "error": "token_expired",
+                                "message": f"Authentication token expired for server {server_name}. Please re-authenticate.",
+                                "authorization_url": f"/oauth/{server_name}/authorize",
+                                "server": server_name
+                            }
+                        )
+                    else:
+                        # Re-raise other errors as-is
+                        raise
                 
                 # Execute the tool
                 tool_args = args or {}
@@ -135,7 +165,37 @@ class MultiUserEndpointManager:
                 else:
                     logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with no args")
 
-                result = await session.call_tool(endpoint_name, arguments=tool_args)
+                try:
+                    result = await session.call_tool(endpoint_name, arguments=tool_args)
+                except (httpx.HTTPStatusError, Exception) as e:
+                    # Check if this is a 401 error indicating invalid token during tool execution
+                    is_401_error = False
+                    if isinstance(e, httpx.HTTPStatusError):
+                        is_401_error = e.response.status_code == 401
+                    else:
+                        error_msg = str(e).lower()
+                        is_401_error = "401" in error_msg or "unauthorized" in error_msg
+                        
+                    if is_401_error:
+                        logger.warning(f"Token authentication failed during tool call (401), clearing authentication state: {e}")
+                        # Clear authentication state for this user/server
+                        await oauth_manager.clear_user_session_auth(request, server_name)
+                        # Also clear the endpoint manager's cache
+                        await self.clear_user_session_cache(user_id, server_name)
+                        
+                        # Re-raise as authentication required error
+                        raise HTTPException(
+                            status_code=401,
+                            detail={
+                                "error": "token_expired",
+                                "message": f"Authentication token expired during tool execution for server {server_name}. Please re-authenticate.",
+                                "authorization_url": f"/oauth/{server_name}/authorize",
+                                "server": server_name
+                            }
+                        )
+                    else:
+                        # Re-raise other errors as-is
+                        raise
 
                 if result.isError:
                     error_message = "Unknown tool execution error"
@@ -153,6 +213,13 @@ class MultiUserEndpointManager:
                     response_data[0] if len(response_data) == 1 else response_data
                 )
                 return final_response
+
+    async def clear_user_session_cache(self, user_id: str, server_name: str):
+        """Clear cached session for a user when authentication fails"""
+        async with self._session_lock:
+            if user_id in self._user_sessions and server_name in self._user_sessions[user_id]:
+                self._user_sessions[user_id][server_name]["expired"] = True
+                logger.info(f"Marked session as expired for user {user_id[:8]}..., server {server_name}")
 
     async def create_user_aware_tool_handler(self, app: FastAPI, server_name: str,
                                            oauth_config: Dict[str, Any],
@@ -234,84 +301,115 @@ class MultiUserEndpointManager:
             # Use the MCP SDK's streamablehttp_client with simple token auth
             from contextlib import AsyncExitStack
             
-            async with AsyncExitStack() as stack:
-                # Create the client with simple token authentication
-                client_context = streamablehttp_client(
-                    url=server_url,
-                    headers=headers,
-                    auth=SimpleTokenAuth(tokens.access_token)
-                )
-                
-                # Enter the client context
-                reader, writer, *_ = await stack.enter_async_context(client_context)
-                
-                # Create MCP session
-                session = await stack.enter_async_context(ClientSession(reader, writer))
-                
-                # Initialize the session
-                logger.info("Initializing MCP session for tool discovery...")
-                result = await session.initialize()
-                
-                # Extract server info if available
-                server_info = getattr(result, "serverInfo", None)
-                if server_info:
-                    app.title = server_info.name or app.title
-                    app.description = f"{server_info.name} MCP Server" if server_info.name else app.description
-                    app.version = server_info.version or app.version
-                    logger.info(f"Server info: {server_info.name} v{server_info.version}")
-                
-                # List tools
-                logger.info("Listing available tools...")
-                tools_result = await session.list_tools()
-                tools = tools_result.tools
-                
-                logger.info(f"Found {len(tools)} tools")
+            try:
+                async with AsyncExitStack() as stack:
+                    # Create the client with simple token authentication
+                    client_context = streamablehttp_client(
+                        url=server_url,
+                        headers=headers,
+                        auth=SimpleTokenAuth(tokens.access_token)
+                    )
+                    
+                    # Enter the client context
+                    reader, writer, *_ = await stack.enter_async_context(client_context)
+                    
+                    # Create MCP session
+                    session = await stack.enter_async_context(ClientSession(reader, writer))
+                    
+                    # Initialize the session
+                    logger.info("Initializing MCP session for tool discovery...")
+                    result = await session.initialize()
+                    
+                    # Extract server info if available
+                    server_info = getattr(result, "serverInfo", None)
+                    if server_info:
+                        app.title = server_info.name or app.title
+                        app.description = f"{server_info.name} MCP Server" if server_info.name else app.description
+                        app.version = server_info.version or app.version
+                        logger.info(f"Server info: {server_info.name} v{server_info.version}")
+                    
+                    # List tools
+                    logger.info("Listing available tools...")
+                    tools_result = await session.list_tools()
+                    tools = tools_result.tools
+                    
+                    logger.info(f"Found {len(tools)} tools")
 
-                # Create user-aware tool handler factory
-                tool_handler_factory = await self.create_user_aware_tool_handler(
-                    app, server_name, oauth_config, server_url, headers
-                )
-
-                # Create endpoints for each tool
-                for tool in tools:
-                    endpoint_name = tool.name
-                    endpoint_description = tool.description or ""
-
-                    inputSchema = tool.inputSchema
-                    outputSchema = getattr(tool, "outputSchema", None)
-
-                    form_model_fields = get_model_fields(
-                        f"{endpoint_name}_form_model",
-                        inputSchema.get("properties", {}),
-                        inputSchema.get("required", []),
-                        inputSchema.get("$defs", {}),
+                    # Create user-aware tool handler factory
+                    tool_handler_factory = await self.create_user_aware_tool_handler(
+                        app, server_name, oauth_config, server_url, headers
                     )
 
-                    response_model_fields = None
-                    if outputSchema:
-                        response_model_fields = get_model_fields(
-                            f"{endpoint_name}_response_model",
-                            outputSchema.get("properties", {}),
-                            outputSchema.get("required", []),
-                            outputSchema.get("$defs", {}),
+                    # Create endpoints for each tool
+                    for tool in tools:
+                        endpoint_name = tool.name
+                        endpoint_description = tool.description or ""
+
+                        inputSchema = tool.inputSchema
+                        outputSchema = getattr(tool, "outputSchema", None)
+
+                        form_model_fields = get_model_fields(
+                            f"{endpoint_name}_form_model",
+                            inputSchema.get("properties", {}),
+                            inputSchema.get("required", []),
+                            inputSchema.get("$defs", {}),
                         )
 
-                    # Create the user-aware tool handler
-                    user_tool_handler = tool_handler_factory(
-                        endpoint_name, form_model_fields, response_model_fields
-                    )
+                        response_model_fields = None
+                        if outputSchema:
+                            response_model_fields = get_model_fields(
+                                f"{endpoint_name}_response_model",
+                                outputSchema.get("properties", {}),
+                                outputSchema.get("required", []),
+                                outputSchema.get("$defs", {}),
+                            )
 
-                    # Register the endpoint
-                    app.post(
-                        f"/{endpoint_name}",
-                        summary=endpoint_name.replace("_", " ").title(),
-                        description=endpoint_description,
-                        response_model_exclude_none=True,
-                    )(user_tool_handler)
+                        # Create the user-aware tool handler
+                        user_tool_handler = tool_handler_factory(
+                            endpoint_name, form_model_fields, response_model_fields
+                        )
 
-                    logger.info(f"Registered multi-user endpoint: {endpoint_name} for server {server_name}")
+                        # Register the endpoint
+                        app.post(
+                            f"/{endpoint_name}",
+                            summary=endpoint_name.replace("_", " ").title(),
+                            description=endpoint_description,
+                            response_model_exclude_none=True,
+                        )(user_tool_handler)
 
-                logger.info(f"Multi-user OAuth server setup complete: {server_name} with {len(tools)} tools")
+                        logger.info(f"Registered multi-user endpoint: {endpoint_name} for server {server_name}")
+
+                    logger.info(f"Multi-user OAuth server setup complete: {server_name} with {len(tools)} tools")
+                    
+            except (ExceptionGroup, BaseExceptionGroup) as eg:
+                # Handle ExceptionGroup that wraps HTTPStatusError from MCP client
+                http_401_error = None
+                for exc in eg.exceptions:
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401:
+                        http_401_error = exc
+                        break
+                
+                if http_401_error:
+                    logger.warning(f"Token authentication failed (401) during tool discovery, clearing authentication state: {http_401_error}")
+                    # Clear authentication state for this user/server
+                    await user_session.clear_authentication()
+                    # Re-raise as authentication required error
+                    raise ValueError("Token authentication failed - user needs to re-authenticate")
+                else:
+                    # Re-raise the original exception group if it's not a 401 error
+                    raise
+                    
+            except httpx.HTTPStatusError as e:
+                # Handle direct HTTPStatusError (just in case)
+                if e.response.status_code == 401:
+                    logger.warning(f"Token authentication failed (401) during tool discovery, clearing authentication state: {e}")
+                    # Clear authentication state for this user/server
+                    await user_session.clear_authentication()
+                    # Re-raise as authentication required error
+                    raise ValueError("Token authentication failed - user needs to re-authenticate")
+                else:
+                    # Re-raise other HTTP errors as-is
+                    raise
 
         except Exception as e:
             logger.error(f"Failed to setup multi-user endpoints for {server_name}: {e}")

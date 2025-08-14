@@ -72,6 +72,11 @@ class InMemoryTokenStorage(TokenStorage):
         
     async def set_client_info(self, info: OAuthClientInformationFull) -> None:
         self.client_info = info
+        
+    async def clear_tokens(self) -> None:
+        """Clear stored tokens"""
+        self.tokens = None
+        logger.info(f"Cleared tokens for server: {self.server_name}, user: {self.user_id}")
 
 
 class FileTokenStorage(TokenStorage):
@@ -125,6 +130,15 @@ class FileTokenStorage(TokenStorage):
                 json.dump(info.model_dump(mode='json'), f)
         except Exception as e:
             logger.error(f"Failed to save client info for {self.server_name}: {e}")
+            
+    async def clear_tokens(self) -> None:
+        """Clear stored tokens"""
+        try:
+            if self.token_file.exists():
+                self.token_file.unlink()
+                logger.info(f"Cleared token file for server: {self.server_name}, user: {self.user_id}")
+        except Exception as e:
+            logger.error(f"Failed to clear token file for {self.server_name}: {e}")
 
 
 class CallbackHandler(BaseHTTPRequestHandler):

@@ -133,6 +133,28 @@ class UserSession:
 
         return False
 
+    async def clear_authentication(self):
+        """Clear authentication state and tokens when they become invalid"""
+        logger.info(f"Clearing authentication for user {self.user_id}, server {self.server_name}")
+        self.is_authenticated = False
+        
+        # Clear stored tokens
+        if self.token_storage:
+            try:
+                await self.token_storage.clear_tokens()
+                logger.info(f"Cleared tokens for user {self.user_id}")
+            except Exception as e:
+                logger.error(f"Failed to clear tokens for user {self.user_id}: {e}")
+        
+        # Close existing client session if any
+        if self.client_session:
+            try:
+                # Note: ClientSession doesn't have explicit close, it's managed by context managers
+                self.client_session = None
+                logger.info(f"Cleared client session for user {self.user_id}")
+            except Exception as e:
+                logger.error(f"Failed to clear client session for user {self.user_id}: {e}")
+
     async def create_client_session(self, server_url: str, headers: Optional[Dict[str, str]] = None) -> Optional[ClientSession]:
         """Create an MCP client session with OAuth authentication"""
         async with self._lock:
@@ -314,6 +336,18 @@ class MultiUserOAuthManager:
             "session_created": session.created_at.isoformat() + "Z",
             "last_activity": session.last_activity.isoformat() + "Z"
         }
+
+    async def clear_user_session_auth(self, request: Request, server_name: str) -> None:
+        """Clear authentication state for a user session when tokens become invalid"""
+        user_id = self._generate_user_id(request)
+        
+        async with self._lock:
+            user_sessions = self._user_sessions.get(user_id, {})
+            session = user_sessions.get(server_name)
+            
+            if session:
+                await session.clear_authentication()
+                logger.info(f"Cleared authentication for user {user_id[:8]}..., server {server_name}")
 
 
 # Global instance
