@@ -28,9 +28,6 @@ from mcpo.utils.main import get_model_fields, get_tool_handler
 from mcpo.utils.auth import get_verify_api_key, APIKeyMiddleware
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.utils.oauth import create_oauth_provider
-from mcpo.utils.session_manager import UserSessionManager
-from mcpo.utils.oauth_middleware import MultiUserOAuthMiddleware
-from mcpo.utils.auth_aware_endpoints import create_auth_openapi_schema, handle_auth_tool_call
 
 
 logger = logging.getLogger(__name__)
@@ -103,7 +100,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_origins,
                    api_key: Optional[str], strict_auth: bool, api_dependency,
-                   connection_timeout, lifespan, session_manager=None) -> FastAPI:
+                   connection_timeout, lifespan) -> FastAPI:
     """Create a sub-application for an MCP server."""
     sub_app = FastAPI(
         title=f"{server_name}",
@@ -150,21 +147,16 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
 
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
-    
+
     # Store OAuth configuration if present
     sub_app.state.oauth_config = server_cfg.get("oauth")
-    
-    # Pass session manager for OAuth-enabled servers
-    if session_manager:
-        sub_app.state.session_manager = session_manager
 
     return sub_app
 
 
 def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
                         cors_allow_origins, api_key: Optional[str], strict_auth: bool,
-                        api_dependency, connection_timeout, lifespan, path_prefix: str,
-                        session_manager=None):
+                        api_dependency, connection_timeout, lifespan, path_prefix: str):
     """Mount MCP servers from config data."""
     mcp_servers = config_data.get("mcpServers", {})
 
@@ -172,7 +164,7 @@ def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
     for server_name, server_cfg in mcp_servers.items():
         sub_app = create_sub_app(
             server_name, server_cfg, cors_allow_origins, api_key,
-            strict_auth, api_dependency, connection_timeout, lifespan, session_manager
+            strict_auth, api_dependency, connection_timeout, lifespan
         )
         main_app.mount(f"{path_prefix}{server_name}", sub_app)
 
@@ -214,7 +206,6 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         connection_timeout = getattr(main_app.state, 'connection_timeout', None)
         lifespan = getattr(main_app.state, 'lifespan', None)
         path_prefix = getattr(main_app.state, 'path_prefix', "/")
-        session_manager = getattr(main_app.state, 'session_manager', None)
 
         # Remove servers that are no longer in config
         if servers_to_remove:
@@ -243,7 +234,7 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
                 try:
                     sub_app = create_sub_app(
                         server_name, server_cfg, cors_allow_origins, api_key,
-                        strict_auth, api_dependency, connection_timeout, lifespan, session_manager
+                        strict_auth, api_dependency, connection_timeout, lifespan
                     )
                     main_app.mount(f"{path_prefix}{server_name}", sub_app)
                 except Exception as e:
@@ -264,15 +255,7 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
 
 
 async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
-    # Check if this is an OAuth-enabled server without a session
-    oauth_config = getattr(app.state, "oauth_config", None)
-    session: ClientSession = getattr(app.state, "session", None)
-    
-    if oauth_config and not session:
-        # OAuth-enabled server - add authentication tools instead of real tools
-        await create_auth_endpoints(app, api_dependency)
-        return
-        
+    session: ClientSession = app.state.session
     if not session:
         raise ValueError("Session is not initialized in the app state.")
 
@@ -329,318 +312,6 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             response_model_exclude_none=True,
             dependencies=[Depends(api_dependency)] if api_dependency else [],
         )(tool_handler)
-
-
-async def create_auth_endpoints(app: FastAPI, api_dependency=None):
-    """Create authentication endpoints for OAuth-enabled servers"""
-    from fastapi import Request
-    from fastapi.responses import JSONResponse
-    
-    server_name = app.title
-    session_manager = app.state.session_manager if hasattr(app.state, 'session_manager') else None
-    
-    if not session_manager:
-        logger.error("Session manager not available for OAuth server")
-        return
-        
-    app.description = f"{server_name} MCP Server - Authentication Required"
-    
-    async def authenticate_endpoint(request: Request):
-        """Authentication tool endpoint"""
-        try:
-            # Parse request body for arguments
-            args = {}
-            if request.method == "POST":
-                try:
-                    body = await request.json() 
-                    args = body if isinstance(body, dict) else {}
-                except:
-                    args = {}
-                    
-            return await handle_auth_tool_call(
-                request, "authenticate", server_name, session_manager, args
-            )
-        except Exception as e:
-            logger.error(f"Error in authenticate endpoint: {e}")
-            return JSONResponse({
-                "error": "authentication_error",
-                "message": str(e)
-            }, status_code=500)
-    
-    async def auth_status_endpoint(request: Request):
-        """Auth status tool endpoint"""
-        try:
-            return await handle_auth_tool_call(
-                request, "auth_status", server_name, session_manager
-            )
-        except Exception as e:
-            logger.error(f"Error in auth status endpoint: {e}")
-            return JSONResponse({
-                "error": "status_error", 
-                "message": str(e)
-            }, status_code=500)
-    
-    # Add the authentication endpoints
-    app.post(
-        "/authenticate",
-        summary="Start OAuth Authentication",
-        description=f"Initiates OAuth authentication flow for {server_name}",
-        response_model_exclude_none=True,
-        dependencies=[Depends(api_dependency)] if api_dependency else [],
-    )(authenticate_endpoint)
-    
-    app.get(
-        "/auth-status", 
-        summary="Check Authentication Status",
-        description=f"Check if user is authenticated for {server_name}",
-        response_model_exclude_none=True,
-        dependencies=[Depends(api_dependency)] if api_dependency else [],
-    )(auth_status_endpoint)
-    
-    # Override OpenAPI schema to show auth tools
-    def get_auth_openapi():
-        base_url = "http://localhost:8000"  # This should be dynamically determined
-        return create_auth_openapi_schema(server_name, base_url, False)
-    
-    app.openapi = get_auth_openapi
-
-
-def add_oauth_routes(app: FastAPI, session_manager: UserSessionManager, mcpo_port: int = 8000):
-    """Add OAuth routes to the main FastAPI app"""
-    from fastapi import Request, HTTPException
-    from fastapi.responses import JSONResponse, HTMLResponse
-    
-    @app.get("/oauth/{server_name}/authorize")
-    async def oauth_authorize(server_name: str, request: Request):
-        """Handle OAuth authorization requests"""
-        try:
-            session_id = request.query_params.get('session')
-            state = request.query_params.get('state')
-            
-            if not session_id or not state:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Invalid Request</h2>
-                    <p>Missing session or state parameters.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            session = session_manager.get_session(session_id)
-            if not session:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Session Expired</h2>
-                    <p>Your session has expired. Please try again.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            # Check if OAuth flow is in progress for this server
-            if server_name not in session.oauth_in_progress:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>No OAuth Flow Found</h2>
-                    <p>No OAuth flow in progress for this server.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            flow_info = session.oauth_in_progress[server_name]
-            if flow_info['state'] != state:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Invalid State</h2>
-                    <p>OAuth state mismatch. Please try again.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            # Get the OAuth provider for this session
-            oauth_provider = session.oauth_providers.get(server_name)
-            if not oauth_provider:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>OAuth Error</h2>
-                    <p>OAuth provider not found for this server.</p>
-                    </body></html>
-                """, status_code=500)
-                
-            # Simply trigger the OAuth provider's browser redirect
-            # The provider has been configured with the correct callback URL already
-            try:
-                # Get server config to determine the MCP server URL for connection
-                server_config = session_manager.server_configs.get(server_name, {})
-                mcp_url = server_config.get('url', '')
-                
-                # Use the OAuth provider to open the authorization URL in browser
-                # This is what would normally happen in a desktop app
-                from mcp.client.streamable_http import streamablehttp_client
-                async with streamablehttp_client(mcp_url, auth=oauth_provider) as (read, write, _):
-                    # This should trigger the OAuth flow which will redirect browser
-                    pass
-            except Exception as e:
-                # The OAuth provider should have opened the browser, but connection fails during auth
-                # This is expected - the user needs to complete OAuth first
-                logger.info(f"OAuth flow initiated, user will complete authentication in browser")
-            
-            # Since we can't capture the URL in web context, just show a message
-            return HTMLResponse("""
-                <html><body>
-                <h2>OAuth Authentication Started</h2>
-                <p>The OAuth flow has been initiated. Please check your browser to complete authentication.</p>
-                <p>After completing authentication, you'll be redirected back automatically.</p>
-                </body></html>
-            """, status_code=200)
-            
-            # Return HTML that redirects to OAuth provider
-            html_content = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Authorizing {server_name}</title>
-                <meta http-equiv="refresh" content="2; url={auth_url}">
-                <style>
-                    body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
-                    .container {{ max-width: 500px; margin: 0 auto; padding: 20px; }}
-                    .spinner {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 20px auto; }}
-                    @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h2>Redirecting to {server_name} for authorization...</h2>
-                    <div class="spinner"></div>
-                    <p>If you are not automatically redirected, <a href="{auth_url}">click here</a>.</p>
-                </div>
-                <script>
-                    setTimeout(function() {{
-                        window.location.href = "{auth_url}";
-                    }}, 2000);
-                </script>
-            </body>
-            </html>
-            """
-            
-            return HTMLResponse(content=html_content)
-            
-        except Exception as e:
-            logger.error(f"Error in OAuth authorize: {e}")
-            return HTMLResponse(f"""
-                <html><body>
-                <h2>Authorization Error</h2>
-                <p>An error occurred during authorization: {str(e)}</p>
-                </body></html>
-            """, status_code=500)
-    
-    @app.get("/oauth/{server_name}/callback")
-    async def oauth_callback(server_name: str, request: Request):
-        """Handle OAuth callback from provider"""
-        try:
-            # Extract parameters
-            code = request.query_params.get('code')
-            state = request.query_params.get('state')
-            session_id = request.query_params.get('session')
-            error = request.query_params.get('error')
-            
-            if error:
-                return HTMLResponse(f"""
-                    <html><body>
-                    <h2>Authorization Failed</h2>
-                    <p>Error: {error}</p>
-                    <p>Please try again or contact support.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            if not code or not state or not session_id:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Invalid Callback</h2>
-                    <p>Missing required parameters in OAuth callback.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            session = session_manager.get_session(session_id)
-            if not session:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Session Expired</h2>
-                    <p>Your session has expired. Please try again.</p>
-                    </body></html>
-                """, status_code=400)
-                
-            # Complete OAuth flow
-            success = await session_manager.complete_oauth_flow(
-                session, server_name, code, state
-            )
-            
-            if success:
-                # Set session cookie and show success
-                response = HTMLResponse(f"""
-                    <html><body>
-                    <h2>Authorization Successful!</h2>
-                    <p>You are now authenticated for {server_name}.</p>
-                    <p><a href="/{server_name}/docs">Access {server_name} API</a></p>
-                    <script>
-                        // Close popup if opened in popup window
-                        if (window.opener) {{
-                            window.opener.postMessage({{
-                                type: 'oauth_complete',
-                                server: '{server_name}',
-                                success: true
-                            }}, '*');
-                            window.close();
-                        }}
-                    </script>
-                    </body></html>
-                """)
-                response.set_cookie('mcpo_session', session.session_id, httponly=True, max_age=1800)
-                return response
-            else:
-                return HTMLResponse("""
-                    <html><body>
-                    <h2>Authentication Failed</h2>
-                    <p>Failed to complete OAuth flow. Please try again.</p>
-                    </body></html>
-                """, status_code=500)
-                
-        except Exception as e:
-            logger.error(f"OAuth callback error: {e}")
-            return HTMLResponse(f"""
-                <html><body>
-                <h2>Authentication Error</h2>
-                <p>An error occurred during authentication: {str(e)}</p>
-                </body></html>
-            """, status_code=500)
-    
-    @app.get("/oauth/{server_name}/status")
-    async def oauth_status(server_name: str, request: Request):
-        """Check OAuth status for a server"""
-        try:
-            # Get user session
-            session_cookie = request.cookies.get('mcpo_session')
-            if session_cookie:
-                session = session_manager.get_session(session_cookie)
-                if session:
-                    is_authenticated = session.is_authenticated(server_name)
-                    return JSONResponse({
-                        'authenticated': is_authenticated,
-                        'server': server_name,
-                        'user_id': session.user_id[:8] + '...',
-                        'session_created': session.created_at.isoformat(),
-                        'last_activity': session.last_activity.isoformat()
-                    })
-            
-            # No session found
-            return JSONResponse({
-                'authenticated': False,
-                'server': server_name,
-                'message': 'No active session'
-            })
-            
-        except Exception as e:
-            logger.error(f"Error checking OAuth status: {e}")
-            return JSONResponse({
-                'authenticated': False,
-                'server': server_name,
-                'error': str(e)
-            }, status_code=500)
 
 
 @asynccontextmanager
@@ -729,56 +400,70 @@ async def lifespan(app: FastAPI):
             # The AsyncExitStack will handle the graceful shutdown of all servers
             # when the 'with' block is exited.
     else:
-        # This is a sub-app's lifespan - for multi-user OAuth, we defer connection to per-request
+        # This is a sub-app's lifespan
         app.state.is_connected = False
-        oauth_config = getattr(app.state, "oauth_config", None)
-        
-        if oauth_config:
-            # OAuth-enabled server - don't create connections during startup
-            # Mark as OAuth-ready and defer actual connection to user requests
-            server_name = app.title
-            logger.info(f"OAuth-enabled server ready: {server_name} (connections will be created per user)")
-            app.state.is_oauth_enabled = True
-            app.state.is_connected = True  # Mark as ready to receive requests
-            yield
-        else:
-            # Non-OAuth server - create connection immediately as before
-            try:
-                if server_type == "stdio":
-                    server_params = StdioServerParameters(
-                        command=command,
-                        args=args,
-                        env={**os.environ, **env},
-                    )
-                    client_context = stdio_client(server_params)
-                elif server_type == "sse":
-                    headers = getattr(app.state, "headers", None)
-                    client_context = sse_client(
-                        url=args[0],
-                        sse_read_timeout=connection_timeout or 900,
-                        headers=headers,
-                    )
-                elif server_type == "streamable-http":
-                    headers = getattr(app.state, "headers", None)
-                    client_context = streamablehttp_client(
-                        url=args[0], 
-                        headers=headers,
-                    )
-                else:
-                    raise ValueError(f"Unsupported server type: {server_type}")
+        try:
+            # Check for OAuth configuration
+            oauth_config = getattr(app.state, "oauth_config", None)
+            auth_provider = None
 
-                async with client_context as (reader, writer, *_):
-                    async with ClientSession(reader, writer) as session:
-                        app.state.session = session
-                        await create_dynamic_endpoints(app, api_dependency=api_dependency)
-                        app.state.is_connected = True
-                        yield
-            except Exception as e:
-                # Log the full exception with traceback for debugging
-                logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
-                app.state.is_connected = False
-                # Re-raise the exception so it propagates to the main app's lifespan
-                raise
+            if oauth_config:
+                server_name = app.title
+                logger.info(f"OAuth configuration detected for server: {server_name}")
+                try:
+                    auth_provider = await create_oauth_provider(
+                        server_name=server_name,
+                        oauth_config=oauth_config,
+                        storage_type=oauth_config.get("storage_type", "file"),
+                        user_id="default"  # For multi-user, this would be per-session
+                    )
+                    logger.info(f"OAuth provider created for server: {server_name}")
+                except Exception as e:
+                    logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
+                    raise
+
+            if server_type == "stdio":
+                # stdio doesn't support OAuth authentication
+                if oauth_config:
+                    logger.warning(f"OAuth not supported for stdio server type")
+                server_params = StdioServerParameters(
+                    command=command,
+                    args=args,
+                    env={**os.environ, **env},
+                )
+                client_context = stdio_client(server_params)
+            elif server_type == "sse":
+                # SSE doesn't support OAuth authentication currently
+                if oauth_config:
+                    logger.warning(f"OAuth not supported for SSE server type")
+                headers = getattr(app.state, "headers", None)
+                client_context = sse_client(
+                    url=args[0],
+                    sse_read_timeout=connection_timeout or 900,
+                    headers=headers,
+                )
+            elif server_type == "streamable-http":
+                headers = getattr(app.state, "headers", None)
+                client_context = streamablehttp_client(
+                    url=args[0],
+                    headers=headers,
+                    auth=auth_provider,  # Pass OAuth provider if configured
+                )
+            else:
+                raise ValueError(f"Unsupported server type: {server_type}")
+
+            async with client_context as (reader, writer, *_):
+                async with ClientSession(reader, writer) as session:
+                    app.state.session = session
+                    await create_dynamic_endpoints(app, api_dependency=api_dependency)
+                    app.state.is_connected = True
+                    yield
+        except Exception as e:
+            # Log the full exception with traceback for debugging
+            logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
+            app.state.is_connected = False
+            # Re-raise the exception so it propagates to the main app's lifespan
+            raise
 
 
 async def run(
@@ -844,9 +529,6 @@ async def run(
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()
 
-    # Create session manager for multi-user OAuth
-    session_manager = UserSessionManager(session_timeout_minutes=30, mcpo_port=port)
-    
     main_app = FastAPI(
         title=name,
         description=description,
@@ -859,7 +541,6 @@ async def run(
     # Pass shutdown handler to app state
     main_app.state.shutdown_handler = shutdown_handler
     main_app.state.path_prefix = path_prefix
-    main_app.state.session_manager = session_manager
 
     main_app.add_middleware(
         CORSMiddleware,
@@ -868,12 +549,6 @@ async def run(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # Add OAuth middleware for multi-user authentication
-    main_app.add_middleware(MultiUserOAuthMiddleware, session_manager=session_manager, mcpo_port=port)
-    
-    # Add OAuth routes to main app
-    add_oauth_routes(main_app, session_manager, port)
 
     # Add middleware to protect also documentation and spec
     if api_key and strict_auth:
@@ -915,14 +590,9 @@ async def run(
     elif config_path:
         logger.info(f"Loading MCP server configurations from: {config_path}")
         config_data = load_config(config_path)
-        
-        # Configure session manager with server configs for OAuth
-        mcp_servers = config_data.get("mcpServers", {})
-        session_manager.set_server_configs(mcp_servers)
-        
         mount_config_servers(
             main_app, config_data, cors_allow_origins, api_key, strict_auth,
-            api_dependency, connection_timeout, lifespan, path_prefix, session_manager
+            api_dependency, connection_timeout, lifespan, path_prefix
         )
 
         # Store config info and app state for hot reload
@@ -1021,10 +691,6 @@ async def run(
         # Wait for all tasks to complete
         if shutdown_handler.tasks:
             await asyncio.gather(*shutdown_handler.tasks, return_exceptions=True)
-            
-        # Shutdown session manager
-        if hasattr(main_app.state, 'session_manager'):
-            await main_app.state.session_manager.shutdown()
 
     except SystemExit:
         # Re-raise SystemExit to allow proper program termination

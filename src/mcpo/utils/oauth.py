@@ -222,10 +222,9 @@ async def create_oauth_provider(
     server_name: str,
     oauth_config: Dict[str, Any],
     storage_type: str = "file",
-    user_id: str = None,
-    mcpo_port: int = 8000
+    user_id: str = None
 ) -> OAuthClientProvider:
-    """Create an OAuth provider for a server"""
+    """Create an OAuth provider for a server following MCP SDK best practices"""
     
     # Extract OAuth configuration
     server_url = oauth_config.get("server_url")
@@ -237,8 +236,8 @@ async def create_oauth_provider(
     if not metadata_dict.get("client_name"):
         metadata_dict["client_name"] = f"MCPO Client for {server_name}"
     if not metadata_dict.get("redirect_uris"):
-        # Use MCPO's OAuth callback endpoint instead of local callback server
-        metadata_dict["redirect_uris"] = [f"http://localhost:{mcpo_port}/oauth/{server_name}/callback"]
+        callback_port = oauth_config.get("callback_port", 3030)
+        metadata_dict["redirect_uris"] = [f"http://localhost:{callback_port}/callback"]
     if not metadata_dict.get("grant_types"):
         metadata_dict["grant_types"] = ["authorization_code", "refresh_token"]
     if not metadata_dict.get("response_types"):
@@ -259,12 +258,12 @@ async def create_oauth_provider(
     else:
         storage = FileTokenStorage(server_name, user_id)
     
-    # Setup callback handling
+    # Setup callback handling following MCP SDK pattern
     use_loopback = oauth_config.get("use_loopback", True)
     callback_port = oauth_config.get("callback_port", 3030)
     
     if use_loopback:
-        # Loopback server for automatic callback handling
+        # Loopback server for automatic callback handling (like SDK example)
         callback_server = CallbackServer(callback_port)
         
         async def redirect_handler(url: str) -> None:
@@ -279,7 +278,7 @@ async def create_oauth_provider(
             finally:
                 callback_server.stop()
     else:
-        # Manual copy/paste flow
+        # Manual copy/paste flow (like SDK example)
         async def redirect_handler(url: str) -> None:
             print(f"\n\nPlease visit this URL to authorize:\n{url}\n")
             
@@ -292,6 +291,7 @@ async def create_oauth_provider(
                 raise ValueError("No authorization code found in callback URL")
             return code, state
     
+    # Create provider exactly like MCP SDK example
     return OAuthClientProvider(
         server_url=server_url,
         client_metadata=client_metadata,
