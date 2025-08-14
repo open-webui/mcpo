@@ -1,13 +1,13 @@
 import asyncio
-import hashlib
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlencode
 import weakref
 
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, Response
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -171,17 +171,47 @@ class MultiUserOAuthManager:
         self._lock = asyncio.Lock()
 
     def _generate_user_id(self, request: Request) -> str:
-        """Generate a unique user ID based on IP address and User-Agent"""
-        ip = request.client.host if request.client else "unknown"
-        user_agent = request.headers.get("user-agent", "unknown")
-
-        # Create a hash of IP + User-Agent for user identification
-        combined = f"{ip}:{user_agent}"
-        return hashlib.sha256(combined.encode()).hexdigest()[:16]
+        """Generate a secure unique user ID using random UUID stored in cookie"""
+        # Check if user already has a session UUID in cookies
+        session_uuid = request.cookies.get("mcpo_session_id")
+        
+        if session_uuid:
+            # Validate UUID format to prevent manipulation
+            try:
+                uuid.UUID(session_uuid)
+                return session_uuid
+            except ValueError:
+                # Invalid UUID in cookie, generate new one
+                pass
+        
+        # Generate new cryptographically secure UUID
+        new_uuid = str(uuid.uuid4())
+        logger.info(f"Generated new session UUID: {new_uuid[:8]}...")
+        return new_uuid
+    
+    def _set_session_cookie(self, response: Response, user_id: str) -> None:
+        """Set secure session cookie in response"""
+        response.set_cookie(
+            key="mcpo_session_id",
+            value=user_id,
+            max_age=86400 * 7,  # 7 days
+            httponly=True,
+            secure=True,  # HTTPS only in production
+            samesite="lax"
+        )
 
     async def get_or_create_session(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> UserSession:
         """Get or create a user session for the specified server"""
         user_id = self._generate_user_id(request)
+        
+        # Set secure cookie if this is a new UUID (not already in cookies)
+        if not request.cookies.get("mcpo_session_id"):
+            # Note: The cookie will be set in the response by the calling code
+            # We store the UUID so it can be set in the response headers
+            if hasattr(request.state, 'new_session_uuid'):
+                request.state.new_session_uuid = user_id
+            else:
+                setattr(request.state, 'new_session_uuid', user_id)
 
         async with self._lock:
             if user_id not in self._user_sessions:
@@ -266,12 +296,13 @@ class MultiUserOAuthManager:
     async def get_session_status(self, request: Request, server_name: str) -> Dict[str, Any]:
         """Get the authentication status for a user session"""
         session = await self.get_session(request, server_name)
+        user_id = self._generate_user_id(request)
 
         if not session:
             return {
                 "authenticated": False,
                 "server": server_name,
-                "user_id": None,
+                "user_id": user_id[:8] + "...",  # Partial user ID for privacy
                 "session_created": None,
                 "last_activity": None
             }

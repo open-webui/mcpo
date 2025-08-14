@@ -26,7 +26,13 @@ class OAuthEndpoints:
         """Get OAuth authentication status for the current user"""
         try:
             status = await oauth_manager.get_session_status(request, server_name)
-            return JSONResponse(content=status)
+            response = JSONResponse(content=status)
+            
+            # Set session cookie if new UUID was generated
+            if hasattr(request.state, 'new_session_uuid'):
+                oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
+            
+            return response
         except Exception as e:
             logger.error(f"Error getting OAuth status for {server_name}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -38,11 +44,17 @@ class OAuthEndpoints:
 
             if not needs_auth:
                 # User is already authenticated
-                return JSONResponse(content={
+                response = JSONResponse(content={
                     "message": "User is already authenticated",
                     "authenticated": True,
                     "server": server_name
                 })
+                
+                # Set session cookie if new UUID was generated
+                if hasattr(request.state, 'new_session_uuid'):
+                    oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
+                
+                return response
 
             logger.info(f"OAuth initiation requested for user {session.user_id[:8]}, server {server_name}")
 
@@ -194,15 +206,21 @@ class OAuthEndpoints:
             accept_header = request.headers.get("accept", "")
             if "text/html" in accept_header:
                 # Browser request - redirect directly
-                return RedirectResponse(url=auth_url, status_code=302)
+                response = RedirectResponse(url=auth_url, status_code=302)
             else:
                 # API request - return JSON with auth URL
-                return JSONResponse(content={
+                response = JSONResponse(content={
                     "error": "authentication_required",
                     "message": f"OAuth authentication required for server {server_name}",
                     "authorization_url": auth_url,
                     "server": server_name
                 }, status_code=401)
+            
+            # Set session cookie if new UUID was generated
+            if hasattr(request.state, 'new_session_uuid'):
+                oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
+            
+            return response
 
         except Exception as e:
             logger.error(f"Error in OAuth initiation: {e}")
@@ -333,7 +351,7 @@ class OAuthEndpoints:
 
                         logger.info(f"OAuth completed for user {session.user_id}, server {server_name}")
 
-                        return HTMLResponse(content="""
+                        response = HTMLResponse(content="""
                             <html><body>
                                 <h1>Authorization Successful!</h1>
                                 <p>Your OAuth authorization was completed successfully.</p>
@@ -341,6 +359,12 @@ class OAuthEndpoints:
                                 <script>setTimeout(() => window.close(), 2000);</script>
                             </body></html>
                         """)
+                        
+                        # Set session cookie if new UUID was generated
+                        if hasattr(request.state, 'new_session_uuid'):
+                            oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
+                        
+                        return response
                     else:
                         error_detail = token_response.text
                         logger.error(f"Token exchange failed: {token_response.status_code} - {error_detail}")
