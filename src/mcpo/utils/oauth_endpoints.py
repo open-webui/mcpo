@@ -12,6 +12,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from .multiuser_oauth import oauth_manager, require_oauth_session, UserSession
+from .oauth import _load_callback_html
 
 logger = logging.getLogger(__name__)
 
@@ -248,31 +249,36 @@ class OAuthEndpoints:
             if error:
                 error_desc = query_params.get("error_description", error)
                 logger.error(f"OAuth error for {server_name}: {error_desc}")
-                return HTMLResponse(content=f"""
-                    <html><body>
-                        <h1>Authorization Failed</h1>
-                        <p>Error: {error_desc}</p>
-                        <p>You can close this window and try again.</p>
-                    </body></html>
-                """, status_code=400)
+                html = _load_callback_html(
+                    status="error",
+                    title="Authorization Failed - MCPO",
+                    heading="Authorization Failed",
+                    message=f"The OAuth authorization process encountered an error: {error_desc}",
+                    action_text="Please close this tab and check the application logs for more details."
+                )
+                return HTMLResponse(content=html, status_code=400)
 
             if not code or not state:
-                return HTMLResponse(content="""
-                    <html><body>
-                        <h1>Invalid Callback</h1>
-                        <p>Missing authorization code or state parameter.</p>
-                    </body></html>
-                """, status_code=400)
+                html = _load_callback_html(
+                    status="error",
+                    title="Invalid Callback - MCPO",
+                    heading="Invalid Callback",
+                    message="Missing authorization code or state parameter.",
+                    action_text="Please close this tab and try the authorization process again."
+                )
+                return HTMLResponse(content=html, status_code=400)
 
             # Verify state and get OAuth flow info
             flow_info = self._oauth_flows.get(state)
             if not flow_info:
-                return HTMLResponse(content="""
-                    <html><body>
-                        <h1>Invalid State</h1>
-                        <p>The OAuth state parameter is invalid or expired.</p>
-                    </body></html>
-                """, status_code=400)
+                html = _load_callback_html(
+                    status="error",
+                    title="Invalid State - MCPO",
+                    heading="Invalid State",
+                    message="The OAuth state parameter is invalid or expired.",
+                    action_text="Please close this tab and try the authorization process again."
+                )
+                return HTMLResponse(content=html, status_code=400)
 
             # Clean up the flow and any expired ones
             del self._oauth_flows[state]
@@ -285,12 +291,14 @@ class OAuthEndpoints:
                 session = user_sessions.get(server_name)
 
             if not session:
-                return HTMLResponse(content="""
-                    <html><body>
-                        <h1>Session Not Found</h1>
-                        <p>The user session has expired or is invalid.</p>
-                    </body></html>
-                """, status_code=400)
+                html = _load_callback_html(
+                    status="error",
+                    title="Session Not Found - MCPO",
+                    heading="Session Not Found",
+                    message="The user session has expired or is invalid.",
+                    action_text="Please close this tab and start a new authorization process."
+                )
+                return HTMLResponse(content=html, status_code=400)
 
             # Ensure provider is created and get server URL
             await session.get_or_create_oauth_provider()
@@ -360,14 +368,14 @@ class OAuthEndpoints:
 
                         logger.info(f"OAuth completed for user {session.user_id}, server {server_name}")
 
-                        response = HTMLResponse(content="""
-                            <html><body>
-                                <h1>Authorization Successful!</h1>
-                                <p>Your OAuth authorization was completed successfully.</p>
-                                <p>You can safely close this browser tab and return to your application.</p>
-                                <script>setTimeout(() => window.close(), 2000);</script>
-                            </body></html>
-                        """)
+                        html = _load_callback_html(
+                            status="success",
+                            title="Authorization Successful - MCPO",
+                            heading="Authorization Successful!",
+                            message="Your OAuth authorization was completed successfully.",
+                            action_text="You can safely close this browser tab and return to your application."
+                        )
+                        response = HTMLResponse(content=html)
                         
                         # Set session cookie if new UUID was generated
                         if hasattr(request.state, 'new_session_uuid'):
@@ -377,33 +385,38 @@ class OAuthEndpoints:
                     else:
                         error_detail = token_response.text
                         logger.error(f"Token exchange failed: {token_response.status_code} - {error_detail}")
-                        return HTMLResponse(content=f"""
-                            <html><body>
-                                <h1>Token Exchange Failed</h1>
-                                <p>Failed to exchange authorization code for tokens.</p>
-                                <p>Error: {error_detail}</p>
-                            </body></html>
-                        """, status_code=500)
+                        html = _load_callback_html(
+                            status="error",
+                            title="Token Exchange Failed - MCPO",
+                            heading="Token Exchange Failed",
+                            message=f"Failed to exchange authorization code for tokens. Error: {error_detail}",
+                            action_text="Please close this tab and check the application logs for more details."
+                        )
+                        return HTMLResponse(content=html, status_code=500)
 
             except Exception as e:
                 logger.error(f"Failed to complete OAuth for {server_name}: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                return HTMLResponse(content=f"""
-                    <html><body>
-                        <h1>Authorization Failed</h1>
-                        <p>Failed to complete the authorization process: {str(e)}</p>
-                    </body></html>
-                """, status_code=500)
+                html = _load_callback_html(
+                    status="error",
+                    title="Authorization Failed - MCPO",
+                    heading="Authorization Failed",
+                    message=f"Failed to complete the authorization process: {str(e)}",
+                    action_text="Please close this tab and check the application logs for more details."
+                )
+                return HTMLResponse(content=html, status_code=500)
 
         except Exception as e:
             logger.error(f"Error in OAuth callback: {e}")
-            return HTMLResponse(content=f"""
-                <html><body>
-                    <h1>Callback Error</h1>
-                    <p>An error occurred processing the OAuth callback: {str(e)}</p>
-                </body></html>
-            """, status_code=500)
+            html = _load_callback_html(
+                status="error",
+                title="Callback Error - MCPO",
+                heading="Callback Error",
+                message=f"An error occurred processing the OAuth callback: {str(e)}",
+                action_text="Please close this tab and check the application logs for more details."
+            )
+            return HTMLResponse(content=html, status_code=500)
 
     async def _discover_oauth_config(self, server_url: str) -> Dict[str, Any]:
         """Discover OAuth configuration using RFC 9728"""
