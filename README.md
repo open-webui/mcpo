@@ -129,7 +129,11 @@ Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at
 
 ### 🔐 OAuth 2.1 Authentication
 
-mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
+mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration. mcpo supports both **single-user** and **multi-user** OAuth modes.
+
+#### Single-User OAuth (Traditional)
+
+For single-user scenarios where one user authenticates per mcpo instance:
 
 ```json
 {
@@ -138,20 +142,50 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. The impl
       "type": "streamable-http",
       "url": "http://localhost:8000/mcp",
       "oauth": {
-        "server_url": "http://localhost:8000"
+        "server_url": "http://localhost:8000",
+        "multi_user": false
       }
     }
   }
 }
 ```
 
+#### Multi-User OAuth (Web-Based)
+
+For multi-user scenarios where multiple users can authenticate through a web interface:
+
+```json
+{
+  "mcpServers": {
+    "multi-user-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000",
+        "multi_user": true,
+        "session_timeout_minutes": 30
+      }
+    }
+  }
+}
+```
+
+With multi-user OAuth enabled:
+- Each server gets dedicated OAuth endpoints: `/oauth/{server_name}/authorize`, `/oauth/{server_name}/callback`, `/oauth/{server_name}/status`
+- Users authenticate via web browser at the server's root URL
+- Secure session management with UUID-based user identification
+- Per-user token isolation and automatic session cleanup
+- Dynamic OpenAPI schema generation based on authentication status
+
 #### OAuth Configuration Options
 
 **Basic Options:**
 - `server_url` (required): OAuth server base URL
+- `multi_user`: Enable multi-user mode (default: true)
 - `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
-- `callback_port`: Local port for OAuth callback (default: 3030)
-- `use_loopback`: Auto-open browser for auth (default: true)
+- `session_timeout_minutes`: Session timeout for multi-user mode (default: 30)
+- `callback_port`: Local port for OAuth callback in single-user mode (default: 3030)
+- `use_loopback`: Auto-open browser for auth in single-user mode (default: true)
 
 **Advanced Options (rarely needed):**
 For servers that don't support dynamic client registration, you can specify static client metadata:
@@ -164,6 +198,7 @@ For servers that don't support dynamic client registration, you can specify stat
       "url": "http://api.example.com/mcp",
       "oauth": {
         "server_url": "http://api.example.com",
+        "multi_user": false,
         "client_metadata": {
           "client_name": "My MCPO Client",
           "redirect_uris": ["http://localhost:3030/callback"]
@@ -176,14 +211,23 @@ For servers that don't support dynamic client registration, you can specify stat
 
 > **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
 
-On first connection, mcpo will:
+#### Authentication Flow
+
+**Single-User Mode:**
 1. Perform dynamic client registration (if supported)
 2. Open your browser for authorization
 3. Capture the OAuth callback automatically  
 4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
 5. Use tokens for all subsequent requests
 
-OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
+**Multi-User Mode:**
+1. Users visit the server URL in their browser
+2. Automatic redirect to OAuth authorization endpoint
+3. After authorization, users can access MCP tools through the web interface
+4. Secure session cookies maintain authentication state
+5. Per-user token storage with automatic cleanup of expired sessions
+
+OAuth is supported for `streamable-http` server types. The multi-user implementation follows RFC 6749 (OAuth 2.0), RFC 7636 (PKCE), RFC 7591 (Dynamic Client Registration), and RFC 9728 (OAuth Protected Resource Discovery). See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
 
 ## 🔧 Requirements
 
