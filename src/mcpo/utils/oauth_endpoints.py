@@ -1,0 +1,428 @@
+import asyncio
+import logging
+import secrets
+from typing import Dict, Any, Optional
+from urllib.parse import urlencode, parse_qs, urlparse
+
+from fastapi import Request, Response, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from mcp.client.auth import OAuthClientProvider
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+from .multiuser_oauth import oauth_manager, require_oauth_session, UserSession
+
+logger = logging.getLogger(__name__)
+
+
+class OAuthEndpoints:
+    """OAuth endpoints for multi-user authentication"""
+
+    def __init__(self):
+        # Store ongoing OAuth flows: {state: {session_id, server_name, user_id}}
+        self._oauth_flows: Dict[str, Dict[str, str]] = {}
+
+    async def get_oauth_status(self, request: Request, server_name: str) -> JSONResponse:
+        """Get OAuth authentication status for the current user"""
+        try:
+            status = await oauth_manager.get_session_status(request, server_name)
+            return JSONResponse(content=status)
+        except Exception as e:
+            logger.error(f"Error getting OAuth status for {server_name}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def initiate_oauth(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> Response:
+        """Initiate OAuth flow for a user using MCP SDK"""
+        try:
+            session, needs_auth = await require_oauth_session(request, server_name, oauth_config)
+
+            if not needs_auth:
+                # User is already authenticated
+                return JSONResponse(content={
+                    "message": "User is already authenticated",
+                    "authenticated": True,
+                    "server": server_name
+                })
+
+            logger.info(f"OAuth initiation requested for user {session.user_id[:8]}, server {server_name}")
+
+            # Ensure the OAuth provider is created for this user session
+            await session.get_or_create_oauth_provider()
+
+            # Generate state for CSRF protection
+            state = secrets.token_urlsafe(32)
+            
+            # Generate PKCE parameters if required
+            import hashlib
+            import base64
+            code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+            code_challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode('utf-8')).digest()
+            ).decode('utf-8').rstrip('=')
+
+            # Store the OAuth flow information including PKCE verifier
+            self._oauth_flows[state] = {
+                "session_id": session.user_id,
+                "server_name": server_name,
+                "user_id": session.user_id,
+                "code_verifier": code_verifier  # Store for token exchange
+            }
+
+            # Build redirect URI for our callback
+            base_url = f"{request.url.scheme}://{request.url.netloc}"
+            callback_url = f"{base_url}/oauth/{server_name}/callback"
+
+            # Update session's client metadata with our callback URL
+            if session.client_metadata:
+                from pydantic import AnyUrl
+                session.client_metadata.redirect_uris = [AnyUrl(callback_url)]
+
+            # Let the MCP SDK handle discovery and get the authorization URL
+            # The SDK will perform discovery and dynamic client registration
+            server_url = oauth_config.get("server_url", "http://localhost:8000")
+
+            try:
+                # The provider will handle discovery and dynamic client registration
+                # We need to start the OAuth flow by calling the provider's internal methods
+                import httpx
+                from mcp.shared.auth import OAuthClientInformationFull
+
+                # Perform discovery using the MCP SDK pattern
+                async with httpx.AsyncClient() as client:
+                    # Discover OAuth configuration using RFC 9728
+                    discovery_url = f"{server_url}/.well-known/oauth-authorization-server"
+                    logger.info(f"Attempting OAuth discovery at: {discovery_url}")
+
+                    # Try GET request directly (OPTIONS often returns empty)
+                    discovery_response = await client.get(discovery_url, follow_redirects=True)
+
+                    if discovery_response.status_code == 200:
+                        auth_config = discovery_response.json()
+                        logger.info(f"OAuth discovery successful: {auth_config}")
+
+                        # Check if we have valid OAuth configuration
+                        if not auth_config or "authorization_endpoint" not in auth_config:
+                            logger.warning("OAuth discovery returned incomplete configuration, using fallback")
+                            # Use MCPO itself as the OAuth server for testing
+                            # In production, the MCP server should provide proper OAuth discovery
+                            auth_url = f"{base_url}/oauth/{server_name}/mock-authorize?client_id=mcpo-client&redirect_uri={callback_url}&state={state}&response_type=code"
+                        # Perform dynamic client registration if needed
+                        elif "registration_endpoint" in auth_config:
+                            reg_endpoint = auth_config["registration_endpoint"]
+
+                            # Register client dynamically
+                            reg_data = {
+                                "client_name": f"MCPO Client for {server_name}",
+                                "redirect_uris": [callback_url],
+                                "grant_types": ["authorization_code", "refresh_token"],
+                                "response_types": ["code"],
+                                "token_endpoint_auth_method": "client_secret_post"
+                            }
+
+                            reg_response = await client.post(reg_endpoint, json=reg_data)
+                            if reg_response.status_code in (200, 201):
+                                client_info = reg_response.json()
+                                logger.info(f"Dynamic client registration successful: client_id={client_info.get('client_id')}")
+                                logger.debug(f"Registration response: {client_info}")
+
+                                # Store client info in session's token storage
+                                # Note: The registration response may not include redirect_uris, so we preserve our original metadata
+                                if session.client_metadata:
+                                    # Update the client metadata with the registered redirect URIs if provided
+                                    if "redirect_uris" in client_info:
+                                        from pydantic import AnyUrl
+                                        session.client_metadata.redirect_uris = [AnyUrl(uri) for uri in client_info["redirect_uris"]]
+                                    
+                                oauth_client_info = OAuthClientInformationFull(
+                                    client_id=client_info["client_id"],
+                                    client_secret=client_info.get("client_secret", ""),  # Some servers don't return secret
+                                    client_metadata=session.client_metadata if session.client_metadata else None,
+                                    redirect_uris=session.client_metadata.redirect_uris if session.client_metadata else [callback_url]
+                                )
+                                if session.token_storage:
+                                    await session.token_storage.set_client_info(oauth_client_info)
+
+                                # Build authorization URL with PKCE if required
+                                auth_endpoint = auth_config["authorization_endpoint"]
+                                auth_params = {
+                                    "client_id": client_info["client_id"],
+                                    "redirect_uri": callback_url,
+                                    "response_type": "code",
+                                    "state": state,
+                                    "scope": oauth_config.get("scope", "openid profile email")  # Use configured or default scopes
+                                }
+                                
+                                # Add PKCE parameters if required
+                                if auth_config.get("pkce_required", False):
+                                    auth_params["code_challenge"] = code_challenge
+                                    auth_params["code_challenge_method"] = "S256"
+                                    logger.info("Adding PKCE parameters to authorization request")
+                                
+                                auth_url = f"{auth_endpoint}?{urlencode(auth_params)}"
+                            else:
+                                logger.error(f"Dynamic client registration failed: {reg_response.status_code}")
+                                raise HTTPException(status_code=500, detail="Dynamic client registration failed")
+                        else:
+                            # No dynamic registration, use static client ID
+                            auth_endpoint = auth_config["authorization_endpoint"]
+                            auth_params = {
+                                "client_id": "mcpo-client",
+                                "redirect_uri": callback_url,
+                                "response_type": "code",
+                                "state": state,
+                                "scope": oauth_config.get("scope", "openid profile email")
+                            }
+                            
+                            # Add PKCE parameters if required
+                            if auth_config.get("pkce_required", False):
+                                auth_params["code_challenge"] = code_challenge
+                                auth_params["code_challenge_method"] = "S256"
+                                logger.info("Adding PKCE parameters to authorization request")
+                            
+                            auth_url = f"{auth_endpoint}?{urlencode(auth_params)}"
+                    else:
+                        logger.error(f"OAuth discovery failed: {discovery_response.status_code}")
+                        # Fallback to basic OAuth URL construction
+                        auth_url = f"{server_url}/oauth/authorize?client_id=mcpo-client&redirect_uri={callback_url}&state={state}&response_type=code"
+
+            except Exception as discovery_error:
+                logger.error(f"OAuth discovery/registration error: {discovery_error}")
+                # Fallback URL
+                auth_url = f"{server_url}/oauth/authorize?client_id=mcpo-client&redirect_uri={callback_url}&state={state}&response_type=code"
+
+            # Check if this is a browser request (HTML Accept header)
+            accept_header = request.headers.get("accept", "")
+            if "text/html" in accept_header:
+                # Browser request - redirect directly
+                return RedirectResponse(url=auth_url, status_code=302)
+            else:
+                # API request - return JSON with auth URL
+                return JSONResponse(content={
+                    "error": "authentication_required",
+                    "message": f"OAuth authentication required for server {server_name}",
+                    "authorization_url": auth_url,
+                    "server": server_name
+                }, status_code=401)
+
+        except Exception as e:
+            logger.error(f"Error in OAuth initiation: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"OAuth initiation failed: {str(e)}")
+
+    async def handle_oauth_callback(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> Response:
+        """Handle OAuth callback and exchange code for tokens"""
+        try:
+            # Parse callback parameters
+            query_params = dict(request.query_params)
+            code = query_params.get("code")
+            state = query_params.get("state")
+            error = query_params.get("error")
+
+            if error:
+                error_desc = query_params.get("error_description", error)
+                logger.error(f"OAuth error for {server_name}: {error_desc}")
+                return HTMLResponse(content=f"""
+                    <html><body>
+                        <h1>Authorization Failed</h1>
+                        <p>Error: {error_desc}</p>
+                        <p>You can close this window and try again.</p>
+                    </body></html>
+                """, status_code=400)
+
+            if not code or not state:
+                return HTMLResponse(content="""
+                    <html><body>
+                        <h1>Invalid Callback</h1>
+                        <p>Missing authorization code or state parameter.</p>
+                    </body></html>
+                """, status_code=400)
+
+            # Verify state and get OAuth flow info
+            flow_info = self._oauth_flows.get(state)
+            if not flow_info:
+                return HTMLResponse(content="""
+                    <html><body>
+                        <h1>Invalid State</h1>
+                        <p>The OAuth state parameter is invalid or expired.</p>
+                    </body></html>
+                """, status_code=400)
+
+            # Clean up the flow
+            del self._oauth_flows[state]
+
+            # Get the user session
+            session = None
+            async with oauth_manager._lock:
+                user_sessions = oauth_manager._user_sessions.get(flow_info["user_id"], {})
+                session = user_sessions.get(server_name)
+
+            if not session:
+                return HTMLResponse(content="""
+                    <html><body>
+                        <h1>Session Not Found</h1>
+                        <p>The user session has expired or is invalid.</p>
+                    </body></html>
+                """, status_code=400)
+
+            # Ensure provider is created and get server URL
+            await session.get_or_create_oauth_provider()
+            server_url = oauth_config.get("server_url", "http://localhost:8000")
+
+            try:
+                import httpx
+                from mcp.shared.auth import OAuthToken
+
+                # Get stored client info from session's token storage
+                client_info = None
+                if session.token_storage:
+                    client_info = await session.token_storage.get_client_info()
+
+                # Build callback URL
+                base_url = f"{request.url.scheme}://{request.url.netloc}"
+                callback_url = f"{base_url}/oauth/{server_name}/callback"
+
+                # Exchange authorization code for tokens
+                async with httpx.AsyncClient() as client:
+                    # First discover token endpoint
+                    discovery_url = f"{server_url}/.well-known/oauth-authorization-server"
+                    discovery_response = await client.get(discovery_url)
+
+                    if discovery_response.status_code == 200:
+                        auth_config = discovery_response.json()
+                        token_endpoint = auth_config["token_endpoint"]
+                    else:
+                        # Fallback to standard endpoint
+                        token_endpoint = f"{server_url}/oauth/token"
+
+                    # Exchange code for tokens
+                    token_data = {
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": callback_url,
+                        "client_id": client_info.client_id if client_info else "mcpo-client",
+                        "client_secret": client_info.client_secret if client_info else ""
+                    }
+                    
+                    # Add PKCE code_verifier if it was used
+                    if flow_info.get("code_verifier"):
+                        token_data["code_verifier"] = flow_info["code_verifier"]
+                        logger.info("Including PKCE code_verifier in token exchange")
+
+                    token_response = await client.post(token_endpoint, data=token_data)
+
+                    if token_response.status_code == 200:
+                        token_json = token_response.json()
+
+                        # Store tokens using provider's storage
+                        oauth_token = OAuthToken(
+                            access_token=token_json["access_token"],
+                            token_type=token_json.get("token_type", "Bearer"),
+                            refresh_token=token_json.get("refresh_token"),
+                            expires_in=token_json.get("expires_in"),
+                            scope=token_json.get("scope", "mcp")
+                        )
+
+                        # Store tokens using session's token storage
+                        if session.token_storage:
+                            await session.token_storage.set_tokens(oauth_token)
+
+                        # Mark session as authenticated
+                        session.is_authenticated = True
+                        session.update_activity()
+
+                        logger.info(f"OAuth completed for user {session.user_id}, server {server_name}")
+
+                        return HTMLResponse(content="""
+                            <html><body>
+                                <h1>Authorization Successful!</h1>
+                                <p>Your OAuth authorization was completed successfully.</p>
+                                <p>You can safely close this browser tab and return to your application.</p>
+                                <script>setTimeout(() => window.close(), 2000);</script>
+                            </body></html>
+                        """)
+                    else:
+                        error_detail = token_response.text
+                        logger.error(f"Token exchange failed: {token_response.status_code} - {error_detail}")
+                        return HTMLResponse(content=f"""
+                            <html><body>
+                                <h1>Token Exchange Failed</h1>
+                                <p>Failed to exchange authorization code for tokens.</p>
+                                <p>Error: {error_detail}</p>
+                            </body></html>
+                        """, status_code=500)
+
+            except Exception as e:
+                logger.error(f"Failed to complete OAuth for {server_name}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return HTMLResponse(content=f"""
+                    <html><body>
+                        <h1>Authorization Failed</h1>
+                        <p>Failed to complete the authorization process: {str(e)}</p>
+                    </body></html>
+                """, status_code=500)
+
+        except Exception as e:
+            logger.error(f"Error in OAuth callback: {e}")
+            return HTMLResponse(content=f"""
+                <html><body>
+                    <h1>Callback Error</h1>
+                    <p>An error occurred processing the OAuth callback: {str(e)}</p>
+                </body></html>
+            """, status_code=500)
+
+    async def _discover_oauth_config(self, server_url: str) -> Dict[str, Any]:
+        """Discover OAuth configuration using RFC 9728"""
+        import httpx
+
+        # Try to discover OAuth authorization server
+        try:
+            async with httpx.AsyncClient() as client:
+                # First try RFC 9728 protected resource discovery
+                response = await client.get(f"{server_url}/.well-known/oauth-protected-resource")
+                if response.status_code == 200:
+                    resource_config = response.json()
+                    auth_servers = resource_config.get("authorization_servers", [])
+                    if auth_servers:
+                        auth_server_url = auth_servers[0]
+
+                        # Now get the authorization server metadata
+                        auth_response = await client.get(f"{auth_server_url}/.well-known/oauth-authorization-server")
+                        if auth_response.status_code == 200:
+                            return auth_response.json()
+
+                # Fallback: try direct authorization server discovery
+                response = await client.get(f"{server_url}/.well-known/oauth-authorization-server")
+                if response.status_code == 200:
+                    return response.json()
+
+            raise HTTPException(status_code=500, detail="Unable to discover OAuth configuration")
+
+        except Exception as e:
+            logger.error(f"OAuth discovery failed: {e}")
+            raise HTTPException(status_code=500, detail=f"OAuth discovery failed: {str(e)}")
+
+    async def _register_client(self, provider: OAuthClientProvider, auth_config: Dict[str, Any]) -> Any:
+        """Register OAuth client dynamically"""
+        # This would typically use the provider's client registration capabilities
+        # For now, we'll assume the client info is configured or use dynamic registration
+        # The MCP SDK should handle this internally
+
+        # Return mock client info - in reality this comes from dynamic registration
+        from mcp.shared.auth import OAuthClientInformationFull
+
+        client_info = OAuthClientInformationFull(
+            client_id="mcpo-client-" + secrets.token_urlsafe(8),
+            client_secret=secrets.token_urlsafe(32),
+            client_metadata=provider.client_metadata
+        )
+
+        # Store the client info
+        await provider.storage.set_client_info(client_info)
+
+        return client_info
+
+
+# Global instance
+oauth_endpoints = OAuthEndpoints()
