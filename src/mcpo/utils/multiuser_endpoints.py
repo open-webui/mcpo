@@ -229,7 +229,7 @@ class MultiUserEndpointManager:
             if not tokens or not tokens.access_token:
                 raise ValueError("No valid access token available")
             
-            logger.info(f"Using existing access token for tool discovery: {tokens.access_token[:20]}...")
+            logger.info("Using existing access token for tool discovery")
             
             # Use the MCP SDK's streamablehttp_client with simple token auth
             from contextlib import AsyncExitStack

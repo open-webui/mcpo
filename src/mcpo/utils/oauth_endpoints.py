@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+import time
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode, parse_qs, urlparse
 
@@ -19,8 +20,8 @@ class OAuthEndpoints:
     """OAuth endpoints for multi-user authentication"""
 
     def __init__(self):
-        # Store ongoing OAuth flows: {state: {session_id, server_name, user_id}}
-        self._oauth_flows: Dict[str, Dict[str, str]] = {}
+        # Store ongoing OAuth flows: {state: {session_id, server_name, user_id, created_at}}
+        self._oauth_flows: Dict[str, Dict[str, Any]] = {}
 
     async def get_oauth_status(self, request: Request, server_name: str) -> JSONResponse:
         """Get OAuth authentication status for the current user"""
@@ -40,6 +41,9 @@ class OAuthEndpoints:
     async def initiate_oauth(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> Response:
         """Initiate OAuth flow for a user using MCP SDK"""
         try:
+            # Clean up expired flows on each OAuth initiation
+            self._cleanup_expired_flows()
+            
             session, needs_auth = await require_oauth_session(request, server_name, oauth_config)
 
             if not needs_auth:
@@ -77,8 +81,12 @@ class OAuthEndpoints:
                 "session_id": session.user_id,
                 "server_name": server_name,
                 "user_id": session.user_id,
-                "code_verifier": code_verifier  # Store for token exchange
+                "code_verifier": code_verifier,  # Store for token exchange
+                "created_at": time.time()  # TTL tracking
             }
+            
+            # Clean up expired flows (older than 10 minutes)
+            self._cleanup_expired_flows()
 
             # Build redirect URI for our callback
             base_url = f"{request.url.scheme}://{request.url.netloc}"
@@ -266,8 +274,9 @@ class OAuthEndpoints:
                     </body></html>
                 """, status_code=400)
 
-            # Clean up the flow
+            # Clean up the flow and any expired ones
             del self._oauth_flows[state]
+            self._cleanup_expired_flows()
 
             # Get the user session
             session = None
@@ -446,6 +455,20 @@ class OAuthEndpoints:
         await provider.storage.set_client_info(client_info)
 
         return client_info
+    
+    def _cleanup_expired_flows(self) -> None:
+        """Remove OAuth flows older than 10 minutes to prevent memory leaks"""
+        cutoff = time.time() - 600  # 10 minutes
+        expired_states = [
+            state for state, flow in self._oauth_flows.items()
+            if flow.get('created_at', 0) < cutoff
+        ]
+        
+        for state in expired_states:
+            del self._oauth_flows[state]
+            
+        if expired_states:
+            logger.info(f"Cleaned up {len(expired_states)} expired OAuth flows")
 
 
 # Global instance
