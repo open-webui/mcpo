@@ -143,6 +143,9 @@ class MultiUserEndpointManager:
                         
                         async with client_context as (reader, writer, *_):
                             async with ClientSession(reader, writer) as session:
+                                # Initialize the session first
+                                await session.initialize()
+                                
                                 # Use the existing tool handler logic but with user session
                                 args = form_data.model_dump(exclude_none=True, by_alias=True)
                                 logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with args: {args}")
@@ -219,6 +222,9 @@ class MultiUserEndpointManager:
                         # Create a new MCP session for this request
                         async with client_context as (reader, writer, *_):
                             async with ClientSession(reader, writer) as session:
+                                # Initialize the session first
+                                await session.initialize()
+                                
                                 logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with no args")
                                 result = await session.call_tool(endpoint_name, arguments={})
 
