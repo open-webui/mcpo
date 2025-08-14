@@ -1,7 +1,11 @@
 import asyncio
+import base64
+import hashlib
+import httpx
 import logging
 import secrets
 import time
+import traceback
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode, parse_qs, urlparse
 
@@ -10,6 +14,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from mcp.client.auth import OAuthClientProvider
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import AnyUrl
 
 from .multiuser_oauth import oauth_manager, require_oauth_session, UserSession
 from .oauth import _load_callback_html
@@ -70,8 +76,6 @@ class OAuthEndpoints:
             state = secrets.token_urlsafe(32)
             
             # Generate PKCE parameters if required
-            import hashlib
-            import base64
             code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
             code_challenge = base64.urlsafe_b64encode(
                 hashlib.sha256(code_verifier.encode('utf-8')).digest()
@@ -95,7 +99,6 @@ class OAuthEndpoints:
 
             # Update session's client metadata with our callback URL
             if session.client_metadata:
-                from pydantic import AnyUrl
                 session.client_metadata.redirect_uris = [AnyUrl(callback_url)]
 
             # Let the MCP SDK handle discovery and get the authorization URL
@@ -105,8 +108,6 @@ class OAuthEndpoints:
             try:
                 # The provider will handle discovery and dynamic client registration
                 # We need to start the OAuth flow by calling the provider's internal methods
-                import httpx
-                from mcp.shared.auth import OAuthClientInformationFull
 
                 # Perform discovery using the MCP SDK pattern
                 async with httpx.AsyncClient() as client:
@@ -151,7 +152,6 @@ class OAuthEndpoints:
                                 if session.client_metadata:
                                     # Update the client metadata with the registered redirect URIs if provided
                                     if "redirect_uris" in client_info:
-                                        from pydantic import AnyUrl
                                         session.client_metadata.redirect_uris = [AnyUrl(uri) for uri in client_info["redirect_uris"]]
                                     
                                 oauth_client_info = OAuthClientInformationFull(
@@ -233,7 +233,6 @@ class OAuthEndpoints:
 
         except Exception as e:
             logger.error(f"Error in OAuth initiation: {e}")
-            import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"OAuth initiation failed: {str(e)}")
 
@@ -305,8 +304,6 @@ class OAuthEndpoints:
             server_url = oauth_config.get("server_url", "http://localhost:8000")
 
             try:
-                import httpx
-                from mcp.shared.auth import OAuthToken
 
                 # Get stored client info from session's token storage
                 client_info = None
@@ -396,7 +393,6 @@ class OAuthEndpoints:
 
             except Exception as e:
                 logger.error(f"Failed to complete OAuth for {server_name}: {e}")
-                import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 html = _load_callback_html(
                     status="error",
@@ -420,7 +416,6 @@ class OAuthEndpoints:
 
     async def _discover_oauth_config(self, server_url: str) -> Dict[str, Any]:
         """Discover OAuth configuration using RFC 9728"""
-        import httpx
 
         # Try to discover OAuth authorization server
         try:
@@ -456,7 +451,6 @@ class OAuthEndpoints:
         # The MCP SDK should handle this internally
 
         # Return mock client info - in reality this comes from dynamic registration
-        from mcp.shared.auth import OAuthClientInformationFull
 
         client_info = OAuthClientInformationFull(
             client_id="mcpo-client-" + secrets.token_urlsafe(8),
