@@ -9,8 +9,19 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from .multiuser_oauth import oauth_manager, require_oauth_session
 from .main import get_model_fields, get_tool_handler, process_tool_response
+import httpx
 
 logger = logging.getLogger(__name__)
+
+
+class SimpleTokenAuth(httpx.Auth):
+    """Simple auth that just adds the bearer token"""
+    def __init__(self, token: str):
+        self.token = token
+    
+    def auth_flow(self, request):
+        request.headers["Authorization"] = f"Bearer {self.token}"
+        yield request
 
 
 class MultiUserEndpointManager:
@@ -81,6 +92,68 @@ class MultiUserEndpointManager:
                     detail=f"Failed to connect to MCP server: {str(e)}"
                 )
 
+    async def _execute_authenticated_tool(self, request: Request, server_name: str, server_url: str, 
+                                        headers: Optional[Dict[str, str]], endpoint_name: str, 
+                                        args: Optional[Dict] = None) -> Any:
+        """Execute a tool with authenticated user session"""
+        # Get the user session
+        user_id = oauth_manager._generate_user_id(request)
+        user_session = await oauth_manager.get_session(request, server_name)
+        
+        if not user_session or not user_session.is_authenticated:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "authentication_required",
+                    "message": f"OAuth authentication required for server {server_name}",
+                    "authorization_url": f"/oauth/{server_name}/authorize",
+                    "server": server_name
+                }
+            )
+        
+        # Get the access token
+        tokens = await user_session.token_storage.get_tokens()
+        if not tokens or not tokens.access_token:
+            raise HTTPException(status_code=401, detail="No valid access token")
+        
+        # Create a new MCP session for this request with simple token auth
+        client_context = streamablehttp_client(
+            url=server_url,
+            headers=headers,
+            auth=SimpleTokenAuth(tokens.access_token)
+        )
+        
+        async with client_context as (reader, writer, *_):
+            async with ClientSession(reader, writer) as session:
+                # Initialize the session first
+                await session.initialize()
+                
+                # Execute the tool
+                tool_args = args or {}
+                if args:
+                    logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with args: {tool_args}")
+                else:
+                    logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with no args")
+
+                result = await session.call_tool(endpoint_name, arguments=tool_args)
+
+                if result.isError:
+                    error_message = "Unknown tool execution error"
+                    if result.content:
+                        from mcp import types
+                        if isinstance(result.content[0], types.TextContent):
+                            error_message = result.content[0].text
+                    raise HTTPException(
+                        status_code=500,
+                        detail={"message": error_message}
+                    )
+
+                response_data = process_tool_response(result)
+                final_response = (
+                    response_data[0] if len(response_data) == 1 else response_data
+                )
+                return final_response
+
     async def create_user_aware_tool_handler(self, app: FastAPI, server_name: str,
                                            oauth_config: Dict[str, Any],
                                            server_url: str, headers: Optional[Dict[str, str]] = None):
@@ -103,72 +176,11 @@ class MultiUserEndpointManager:
                 )
 
                 async def user_tool(request: Request, form_data: FormModel) -> Union[ResponseModel, Any]:
-                    # Get user-specific OAuth session
                     try:
-                        # Get the user session
-                        user_id = oauth_manager._generate_user_id(request)
-                        user_session = await oauth_manager.get_session(request, server_name)
-                        
-                        if not user_session or not user_session.is_authenticated:
-                            raise HTTPException(
-                                status_code=401,
-                                detail={
-                                    "error": "authentication_required",
-                                    "message": f"OAuth authentication required for server {server_name}",
-                                    "authorization_url": f"/oauth/{server_name}/authorize",
-                                    "server": server_name
-                                }
-                            )
-                        
-                        # Get the access token
-                        tokens = await user_session.token_storage.get_tokens()
-                        if not tokens or not tokens.access_token:
-                            raise HTTPException(status_code=401, detail="No valid access token")
-                        
-                        # Create simple token auth
-                        import httpx
-                        class SimpleTokenAuth(httpx.Auth):
-                            def __init__(self, token: str):
-                                self.token = token
-                            def auth_flow(self, request):
-                                request.headers["Authorization"] = f"Bearer {self.token}"
-                                yield request
-                        
-                        # Create a new MCP session for this request with simple token auth
-                        client_context = streamablehttp_client(
-                            url=server_url,
-                            headers=headers,
-                            auth=SimpleTokenAuth(tokens.access_token)
+                        args = form_data.model_dump(exclude_none=True, by_alias=True)
+                        return await self._execute_authenticated_tool(
+                            request, server_name, server_url, headers, endpoint_name, args
                         )
-                        
-                        async with client_context as (reader, writer, *_):
-                            async with ClientSession(reader, writer) as session:
-                                # Initialize the session first
-                                await session.initialize()
-                                
-                                # Use the existing tool handler logic but with user session
-                                args = form_data.model_dump(exclude_none=True, by_alias=True)
-                                logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with args: {args}")
-
-                                result = await session.call_tool(endpoint_name, arguments=args)
-
-                                if result.isError:
-                                    error_message = "Unknown tool execution error"
-                                    if result.content:
-                                        from mcp import types
-                                        if isinstance(result.content[0], types.TextContent):
-                                            error_message = result.content[0].text
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail={"message": error_message}
-                                    )
-
-                                response_data = process_tool_response(result)
-                                final_response = (
-                                    response_data[0] if len(response_data) == 1 else response_data
-                                )
-                                return final_response
-
                     except HTTPException:
                         raise
                     except Exception as e:
@@ -183,68 +195,9 @@ class MultiUserEndpointManager:
                 # No parameters version
                 async def user_tool_no_args(request: Request):
                     try:
-                        # Get the user session
-                        user_id = oauth_manager._generate_user_id(request)
-                        user_session = await oauth_manager.get_session(request, server_name)
-                        
-                        if not user_session or not user_session.is_authenticated:
-                            raise HTTPException(
-                                status_code=401,
-                                detail={
-                                    "error": "authentication_required",
-                                    "message": f"OAuth authentication required for server {server_name}",
-                                    "authorization_url": f"/oauth/{server_name}/authorize",
-                                    "server": server_name
-                                }
-                            )
-                        
-                        # Get the access token
-                        tokens = await user_session.token_storage.get_tokens()
-                        if not tokens or not tokens.access_token:
-                            raise HTTPException(status_code=401, detail="No valid access token")
-                        
-                        # Create simple token auth
-                        import httpx
-                        class SimpleTokenAuth(httpx.Auth):
-                            def __init__(self, token: str):
-                                self.token = token
-                            def auth_flow(self, request):
-                                request.headers["Authorization"] = f"Bearer {self.token}"
-                                yield request
-                        
-                        # Create a new MCP session for this request with simple token auth
-                        client_context = streamablehttp_client(
-                            url=server_url,
-                            headers=headers,
-                            auth=SimpleTokenAuth(tokens.access_token)
+                        return await self._execute_authenticated_tool(
+                            request, server_name, server_url, headers, endpoint_name
                         )
-                        
-                        # Create a new MCP session for this request
-                        async with client_context as (reader, writer, *_):
-                            async with ClientSession(reader, writer) as session:
-                                # Initialize the session first
-                                await session.initialize()
-                                
-                                logger.info(f"Calling endpoint: {endpoint_name} for user {user_id[:8]}..., with no args")
-                                result = await session.call_tool(endpoint_name, arguments={})
-
-                                if result.isError:
-                                    error_message = "Unknown tool execution error"
-                                    if result.content:
-                                        from mcp import types
-                                        if isinstance(result.content[0], types.TextContent):
-                                            error_message = result.content[0].text
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail={"message": error_message}
-                                    )
-
-                                response_data = process_tool_response(result)
-                                final_response = (
-                                    response_data[0] if len(response_data) == 1 else response_data
-                                )
-                                return final_response
-
                     except HTTPException:
                         raise
                     except Exception as e:
@@ -278,19 +231,6 @@ class MultiUserEndpointManager:
             
             logger.info(f"Using existing access token for tool discovery: {tokens.access_token[:20]}...")
             
-            # Create a simple auth class that just adds the bearer token
-            # without triggering a new OAuth flow
-            import httpx
-            
-            class SimpleTokenAuth(httpx.Auth):
-                """Simple auth that just adds the bearer token"""
-                def __init__(self, token: str):
-                    self.token = token
-                
-                def auth_flow(self, request):
-                    request.headers["Authorization"] = f"Bearer {self.token}"
-                    yield request
-            
             # Use the MCP SDK's streamablehttp_client with simple token auth
             from contextlib import AsyncExitStack
             
@@ -299,7 +239,7 @@ class MultiUserEndpointManager:
                 client_context = streamablehttp_client(
                     url=server_url,
                     headers=headers,
-                    auth=SimpleTokenAuth(tokens.access_token)  # Use simple token auth
+                    auth=SimpleTokenAuth(tokens.access_token)
                 )
                 
                 # Enter the client context
