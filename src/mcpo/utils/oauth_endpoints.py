@@ -51,7 +51,7 @@ class OAuthEndpoints:
             if not needs_auth:
                 # User is already authenticated
                 response = JSONResponse(content={
-                    "message": "User is already authenticated",
+                    "message": "User is already authenticated. Tell them to hard refresh (cmd+shift+r on Mac) to see updated tools and try their call again!",
                     "authenticated": True,
                     "server": server_name
                 })
@@ -112,10 +112,8 @@ class OAuthEndpoints:
 
                         # Check if we have valid OAuth configuration
                         if not auth_config or "authorization_endpoint" not in auth_config:
-                            logger.warning("OAuth discovery returned incomplete configuration, using fallback")
-                            # Use MCPO itself as the OAuth server for testing
-                            # In production, the MCP server should provide proper OAuth discovery
-                            auth_url = f"{base_url}/oauth/{server_name}/mock-authorize?client_id=mcpo-client&redirect_uri={callback_url}&state={state}&response_type=code"
+                            logger.error("OAuth discovery returned incomplete configuration, no authorization_endpoint found")
+                            raise HTTPException(status_code=500, detail="OAuth authorization endpoint not found")
                         # Perform dynamic client registration if needed
                         elif "registration_endpoint" in auth_config:
                             reg_endpoint = auth_config["registration_endpoint"]
@@ -422,24 +420,6 @@ class OAuthEndpoints:
             logger.error(f"OAuth discovery failed: {e}")
             raise HTTPException(status_code=500, detail=f"OAuth discovery failed: {str(e)}")
 
-    async def _register_client(self, provider: OAuthClientProvider, auth_config: Dict[str, Any]) -> Any:
-        """Register OAuth client dynamically"""
-        # This would typically use the provider's client registration capabilities
-        # For now, we'll assume the client info is configured or use dynamic registration
-        # The MCP SDK should handle this internally
-
-        # Return mock client info - in reality this comes from dynamic registration
-
-        client_info = OAuthClientInformationFull(
-            client_id="mcpo-client-" + secrets.token_urlsafe(8),
-            client_secret=secrets.token_urlsafe(32),
-            client_metadata=provider.client_metadata
-        )
-
-        # Store the client info
-        await provider.storage.set_client_info(client_info)
-
-        return client_info
 
     def _cleanup_expired_flows(self) -> None:
         """Remove OAuth flows older than 10 minutes to prevent memory leaks"""
