@@ -170,6 +170,32 @@ For multi-user scenarios where multiple users can authenticate through a web int
 }
 ```
 
+#### OpenWebUI Integration with JWT Validation
+
+For integration with OpenWebUI, add JWT validation to verify session tokens:
+
+```json
+{
+  "mcpServers": {
+    "openwebui-server": {
+      "type": "streamable-http", 
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000",
+        "multi_user": true,
+        "webui_secret_key": "your-openwebui-secret-key",
+        "session_timeout_minutes": 60
+      }
+    }
+  }
+}
+```
+
+When `webui_secret_key` is configured, MCPO validates JWT tokens using:
+- **HS256 signature verification** with the shared secret
+- **Token expiration checking** to reject expired tokens  
+- **Graceful fallback** to no verification if secret not provided
+
 With multi-user OAuth enabled:
 - Each server gets dedicated OAuth endpoints: `/oauth/{server_name}/authorize`, `/oauth/{server_name}/callback`, `/oauth/{server_name}/status`
 - Users authenticate via web browser at the server's root URL
@@ -182,6 +208,7 @@ With multi-user OAuth enabled:
 **Basic Options:**
 - `server_url` (required): OAuth server base URL
 - `multi_user`: Enable multi-user mode (default: true)
+- `webui_secret_key`: Shared secret for JWT validation (for OpenWebUI integration)
 - `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
 - `session_timeout_minutes`: Session timeout for multi-user mode (default: 30)
 - `callback_port`: Local port for OAuth callback in single-user mode (default: 3030)
