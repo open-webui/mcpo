@@ -12,6 +12,35 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.18] - 2025-08-14
+
+### Added
+
+- 🔐 **Multi-User OAuth Authentication System**: Comprehensive multi-user OAuth support enabling secure per-user access to MCP servers through web-based authentication flows. Features include:
+  - UUID-based secure session management with HttpOnly cookies
+  - Per-user token storage and isolation
+  - Dynamic OAuth endpoint generation (`/oauth/{server_name}/authorize`, `/oauth/{server_name}/callback`, `/oauth/{server_name}/status`)
+  - Automatic session cleanup with configurable timeouts (default: 30 minutes)
+  - Dynamic OpenAPI schema generation based on user authentication status
+  - Support for PKCE (Proof Key for Code Exchange) for enhanced security
+  - RFC-compliant implementation following OAuth 2.0, PKCE, Dynamic Client Registration, and OAuth Protected Resource Discovery standards
+- 🌐 **OAuth Discovery and Dynamic Client Registration**: Automatic OAuth server discovery using RFC 9728 with fallback support for static client configurations
+- 🔄 **Graceful Token Expiration Handling**: Automatic detection and cleanup of expired authentication tokens with user-friendly re-authentication prompts
+- ⚙️ **Backward Compatible OAuth Modes**: Supports both traditional single-user OAuth (`multi_user: false`) and new multi-user OAuth (`multi_user: true`, default)
+
+### Changed
+
+- 🔧 **Enhanced OAuth Configuration**: Extended OAuth configuration options with `multi_user`, `session_timeout_minutes`, and improved user isolation for token storage
+- 📊 **Dynamic Tool Discovery**: OAuth-authenticated users now trigger dynamic MCP tool discovery and endpoint registration on-demand
+- 🛡️ **Improved Security**: Enhanced token authentication with comprehensive 401 error handling and automatic session state cleanup
+
+### Security
+
+- 🔒 **Secure Session Management**: Cryptographically secure UUID-based session identification prevents session fixation attacks
+- 🍪 **Secure Cookie Implementation**: Session cookies with proper HttpOnly, Secure, and SameSite attributes
+- 🛡️ **CSRF Protection**: State parameter validation in OAuth flows to prevent cross-site request forgery
+- 🔐 **Token Isolation**: Complete per-user token storage isolation prevents cross-user token access
+
 ## [0.0.17] - 2025-07-22
 
 ### Added

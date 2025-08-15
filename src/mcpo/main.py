@@ -9,14 +9,18 @@ from typing import Optional, Dict, Any
 from urllib.parse import urljoin
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse, RedirectResponse
+
 from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+
 
 from mcpo.utils.auth import APIKeyMiddleware, get_verify_api_key
 from mcpo.utils.main import (
@@ -28,6 +32,9 @@ from mcpo.utils.main import get_model_fields, get_tool_handler
 from mcpo.utils.auth import get_verify_api_key, APIKeyMiddleware
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.utils.oauth import create_oauth_provider
+from mcpo.utils.multiuser_oauth import oauth_manager
+from mcpo.utils.oauth_endpoints import oauth_endpoints
+from mcpo.utils.multiuser_endpoints import multiuser_endpoint_manager
 
 
 logger = logging.getLogger(__name__)
@@ -102,11 +109,16 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
                    api_key: Optional[str], strict_auth: bool, api_dependency,
                    connection_timeout, lifespan) -> FastAPI:
     """Create a sub-application for an MCP server."""
+    # Check if this is a multi-user OAuth server
+    oauth_config = server_cfg.get("oauth")
+    is_multi_user_oauth = oauth_config and oauth_config.get("multi_user", True)
+
     sub_app = FastAPI(
         title=f"{server_name}",
         description=f"{server_name} MCP Server\n\n- [back to tool list](/docs)",
         version="1.0",
         lifespan=lifespan,
+        openapi_url=None if is_multi_user_oauth else "/openapi.json",  # Disable automatic OpenAPI for multi-user OAuth
     )
 
     sub_app.add_middleware(
@@ -147,11 +159,28 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
 
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
-    
+
     # Store OAuth configuration if present
-    sub_app.state.oauth_config = server_cfg.get("oauth")
+    oauth_config = server_cfg.get("oauth")
+    sub_app.state.oauth_config = oauth_config
 
     return sub_app
+
+
+def add_oauth_endpoints_to_main_app(main_app: FastAPI, server_name: str, oauth_config: Dict[str, Any]):
+    """Add OAuth endpoints to the main app for a server with multi-user support"""
+
+    @main_app.get(f"/oauth/{server_name}/status")
+    async def oauth_status(request: Request):
+        return await oauth_endpoints.get_oauth_status(request, server_name)
+
+    @main_app.get(f"/oauth/{server_name}/authorize")
+    async def oauth_authorize(request: Request):
+        return await oauth_endpoints.initiate_oauth(request, server_name, oauth_config)
+
+    @main_app.get(f"/oauth/{server_name}/callback")
+    async def oauth_callback(request: Request):
+        return await oauth_endpoints.handle_oauth_callback(request, server_name, oauth_config)
 
 
 def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
@@ -167,6 +196,11 @@ def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
             strict_auth, api_dependency, connection_timeout, lifespan
         )
         main_app.mount(f"{path_prefix}{server_name}", sub_app)
+
+        # Add OAuth endpoints to main app if OAuth is configured for multi-user
+        oauth_config = server_cfg.get("oauth")
+        if oauth_config and oauth_config.get("multi_user", True):
+            add_oauth_endpoints_to_main_app(main_app, server_name, oauth_config)
 
 
 def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
@@ -405,22 +439,144 @@ async def lifespan(app: FastAPI):
         try:
             # Check for OAuth configuration
             oauth_config = getattr(app.state, "oauth_config", None)
-            auth_provider = None
-            
+
             if oauth_config:
                 server_name = app.title
-                logger.info(f"OAuth configuration detected for server: {server_name}")
-                try:
-                    auth_provider = await create_oauth_provider(
-                        server_name=server_name,
-                        oauth_config=oauth_config,
-                        storage_type=oauth_config.get("storage_type", "file")
-                    )
-                    logger.info(f"OAuth provider created for server: {server_name}")
-                except Exception as e:
-                    logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
-                    raise
-            
+                multi_user = oauth_config.get("multi_user", True)
+
+                if multi_user:
+                    logger.info(f"OAuth-enabled server ready: {server_name} (connections will be created per user)")
+                    # For multi-user OAuth, we don't create connections at startup
+                    # Instead, we store the config and create connections per user on demand
+                    app.state.oauth_enabled = True
+                    app.state.oauth_multi_user = True
+                    # Store the server URL for later use
+                    app.state.server_url = args[0] if args else None
+
+                    # Start the OAuth session cleanup task
+                    await oauth_manager.start_cleanup_task()
+
+                    # Add a simple redirect endpoint to the sub-app
+                    @app.get("/login")
+                    async def oauth_redirect(request: Request):
+                        base_url = f"{request.url.scheme}://{request.url.netloc}"
+                        return RedirectResponse(url=f"{base_url}/oauth/{server_name}/authorize")
+
+                    # The automatic OpenAPI has already been disabled in create_sub_app
+                    # Add our custom OpenAPI generation
+
+                    @app.get("/openapi.json", include_in_schema=False)
+                    async def custom_openapi(request: Request):
+                        """Generate OpenAPI schema dynamically based on user's authentication status"""
+                        logger.info(f"Custom OpenAPI handler called for {server_name}")
+
+                        # Check if user is authenticated
+                        from mcpo.utils.multiuser_oauth import oauth_manager
+                        await oauth_endpoints.initiate_oauth(request, server_name, oauth_config)
+
+                        user_session = await oauth_manager.get_session(request, server_name, oauth_config)
+                        logger.info(f"User session found: {user_session is not None}, authenticated: {user_session.is_authenticated if user_session else False}")
+
+                        if user_session and user_session.is_authenticated:
+                            # User is authenticated, generate schema with tools
+                            # We need to dynamically discover and add the tools
+                            try:
+                                # Get the tools from the MCP server
+                                # Check if we need to discover tools for this app
+                                # Count non-system routes (exclude /, /openapi.json)
+                                tool_routes = [
+                                    route for route in app.routes
+                                    if route.path not in ["/", "/openapi.json", "/{path:path}"]
+                                ]
+
+                                if len(tool_routes) == 0 or len(tool_routes) == 1:
+                                    # Tools haven't been registered yet
+                                    # We need to discover and register them
+                                    from mcpo.utils.multiuser_endpoints import multiuser_endpoint_manager
+
+                                    server_url = getattr(app.state, "server_url", None)
+                                    headers = getattr(app.state, "headers", None)
+
+                                    if server_url:
+                                        logger.info(f"Discovering MCP tools for authenticated user at {server_url}")
+                                        # This will discover tools and register endpoints
+                                        await multiuser_endpoint_manager.setup_multiuser_endpoints(
+                                            app, server_name, oauth_config, server_url, headers, user_session
+                                        )
+                                        logger.info(f"Successfully registered {len(app.routes) - 2} tool endpoints")
+
+                                # Clear any cached schema to force regeneration
+                                app.openapi_schema = None
+
+                                # Generate OpenAPI schema with all registered routes
+                                openapi_schema = get_openapi(
+                                    title=app.title,
+                                    version=app.version,
+                                    description=app.description,
+                                    routes=app.routes,
+                                )
+
+                                logger.info(f"Generated OpenAPI schema with {len(openapi_schema.get('paths', {}))} paths")
+                                return JSONResponse(openapi_schema)
+
+                            except Exception as e:
+                                import traceback
+                                logger.error(f"Error generating OpenAPI schema for authenticated user: {e}")
+                                logger.error(f"Traceback: {traceback.format_exc()}")
+                                # Fall back to basic schema
+
+                        # User not authenticated or error - return basic schema without tools
+                        base_url = f"{request.url.scheme}://{request.url.netloc}"
+                        login_url = f"{base_url}/{server_name}"
+                        basic_schema = {
+                            "openapi": "3.1.0",
+                            "info": {
+                                "title": app.title,
+                                "description": f"ALWAYS RUN THIS TOOL - If the user asks about anything related to {app.title}, you must complete OAuth authentication required to access the tools. Present a clickable link to the user that takes them to {login_url} to complete auth and reload.",
+                                "version": app.version
+                            },
+                            "servers": [
+                                { "url": "/{server_name}" }
+                                ],
+                            "paths": {
+                                "/login": {
+                                    "get": {
+                                        "operationId": f"tool_log_in_to_{server_name}",
+                                        "summary": f"Log in to {server_name}",
+                                        "description": "Redirects to OAuth authorization",
+                                        "responses": {"200": {"description": "Redirect to OAuth"}}
+                                    }
+                                }
+                            }
+                        }
+
+                        return JSONResponse(basic_schema)
+
+                    # For multi-user OAuth, we skip the traditional connection setup
+                    # The connection will be established per user when they make requests
+                    app.state.is_connected = True  # Mark as "ready" for multi-user mode
+                    yield
+
+                    # Cleanup
+                    await oauth_manager.stop_cleanup_task()
+                    return
+                else:
+                    # Traditional single-user OAuth
+                    logger.info(f"OAuth configuration detected for server: {server_name}")
+                    try:
+                        auth_provider = await create_oauth_provider(
+                            server_name=server_name,
+                            oauth_config=oauth_config,
+                            storage_type=oauth_config.get("storage_type", "file"),
+                            user_id="default"
+                        )
+                        logger.info(f"OAuth provider created for server: {server_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
+                        raise
+            else:
+                auth_provider = None
+
             if server_type == "stdio":
                 # stdio doesn't support OAuth authentication
                 if oauth_config:
@@ -443,8 +599,14 @@ async def lifespan(app: FastAPI):
                 )
             elif server_type == "streamable-http":
                 headers = getattr(app.state, "headers", None)
+
+                # For multi-user OAuth, we don't create a connection here
+                if oauth_config and oauth_config.get("multi_user", True):
+                    # This path should not be reached for multi-user OAuth since we return early above
+                    raise ValueError("Multi-user OAuth servers should not reach this code path")
+
                 client_context = streamablehttp_client(
-                    url=args[0], 
+                    url=args[0],
                     headers=headers,
                     auth=auth_provider,  # Pass OAuth provider if configured
                 )

@@ -5,10 +5,12 @@ MCPO now supports OAuth 2.1 client-to-server authentication for MCP servers that
 ## Features
 
 - **OAuth 2.1 Authorization Code Flow**: Full support for the modern OAuth 2.1 standard
+- **Multi-User Support**: Session-based authentication for multiple concurrent users
+- **JWT Validation**: Signature verification for OpenWebUI integration
 - **Automatic Token Refresh**: Tokens are automatically refreshed when they expire
 - **Persistent Token Storage**: Tokens can be stored in memory or on disk
 - **Browser-based Authorization**: Automatically opens browser for user authorization
-- **Loopback Callback Server**: Built-in HTTP server for catching OAuth callbacks
+- **Dynamic Tool Discovery**: Session-aware OpenAPI generation
 
 ## Configuration
 
@@ -73,6 +75,9 @@ For servers that don't support dynamic client registration, you can specify stat
 - `callback_port`: Port for the local callback server (default: 3030)
 - `use_loopback`: Whether to use automatic browser flow (default: true)
 - `storage_type`: Where to store tokens - "memory" or "file" (default: "file")
+- `multi_user`: Enable multi-user mode (default: true)
+- `webui_secret_key`: Shared secret for JWT validation (for OpenWebUI integration)
+- `session_timeout_minutes`: Session timeout for multi-user mode (default: 30)
 - `client_metadata`: OAuth client registration metadata
 
 ### Client Metadata Fields (for static registration only)
@@ -102,6 +107,55 @@ For servers that don't support dynamic client registration, you can specify stat
    - **Memory storage**: Only for the duration of the session
 6. **Token Refresh**: When tokens expire, MCPO automatically refreshes them using the refresh token
 7. **Authentication**: All requests to the MCP server include the access token
+
+## OpenWebUI Integration
+
+MCPO provides seamless integration with OpenWebUI through JWT validation and multi-user session management.
+
+### Configuration for OpenWebUI
+
+To enable OpenWebUI integration, configure MCPO with JWT validation:
+
+```json
+{
+  "mcpServers": {
+    "openwebui-tools": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000",
+        "multi_user": true,
+        "webui_secret_key": "your-openwebui-secret-key",
+        "session_timeout_minutes": 60
+      }
+    }
+  }
+}
+```
+
+### JWT Validation
+
+When `webui_secret_key` is configured, MCPO validates incoming JWT tokens from OpenWebUI:
+
+- **Signature Verification**: Uses HS256 algorithm with the shared secret
+- **Expiration Checking**: Automatically rejects expired tokens
+- **User Context Extraction**: Extracts user ID and claims from valid tokens
+- **Backward Compatibility**: Falls back to no verification if secret not provided
+
+### Integration Benefits
+
+✅ **Session-based Tool Discovery**: Dynamic OpenAPI generation based on user authentication  
+✅ **Per-user Tool Isolation**: Each user gets their own MCP session and tool access  
+✅ **Token Security**: Proper JWT signature verification prevents token forgery  
+✅ **Automatic Cleanup**: Expired sessions and tokens are automatically cleaned up  
+✅ **Zero OpenWebUI Changes**: Works with existing OpenWebUI session forwarding  
+
+### Usage with OpenWebUI
+
+1. **Configure Shared Secret**: Use the same `WEBUI_SECRET_KEY` in both OpenWebUI and MCPO
+2. **Tool Registration**: Add MCPO server URL to OpenWebUI's tool server configuration
+3. **Dynamic Discovery**: OpenWebUI will automatically discover user-appropriate tools
+4. **Session Management**: User sessions are maintained across requests
 
 ## Storage Types
 
@@ -134,9 +188,18 @@ When `use_loopback` is `false`:
 ## Server Support
 
 OAuth authentication is supported for:
-- ✅ `streamable-http` servers
+- ✅ `streamable-http` servers (single-user and multi-user modes)
 - ❌ `sse` servers (not currently supported)
 - ❌ `stdio` servers (OAuth not applicable)
+
+### Multi-User Mode Features
+
+When `multi_user: true` is configured:
+- ✅ Per-user session isolation
+- ✅ JWT token validation (when `webui_secret_key` provided)
+- ✅ Dynamic OpenAPI schema generation
+- ✅ Automatic session cleanup
+- ✅ Web-based authentication flows
 
 ## Security Considerations
 
@@ -161,6 +224,11 @@ Change the `callback_port` to an available port number.
 
 ### Tokens not persisting
 Ensure `storage_type` is set to `"file"` and that MCPO has write permissions to `~/.mcpo/tokens/`.
+
+### JWT validation failures
+- Check that `webui_secret_key` matches the `WEBUI_SECRET_KEY` used by OpenWebUI
+- Verify JWT tokens are not expired
+- Ensure tokens are properly formatted and include required claims (`id` field)
 
 ## Example: Testing OAuth
 
@@ -192,6 +260,42 @@ mcpo --config config_oauth.json
    - Connect to the MCP server
 
 4. Subsequent connections will reuse the stored tokens
+
+## Example: OpenWebUI Integration
+
+1. Create a config file with OpenWebUI integration:
+```json
+{
+  "mcpServers": {
+    "openwebui-tools": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000",
+        "multi_user": true,
+        "webui_secret_key": "sk-your-secret-key-here",
+        "session_timeout_minutes": 60
+      }
+    }
+  }
+}
+```
+
+2. Start MCPO:
+```bash
+mcpo --config config_openwebui.json
+```
+
+3. Configure OpenWebUI:
+   - Set the same `WEBUI_SECRET_KEY` in OpenWebUI environment
+   - Add MCPO server URL to OpenWebUI's tool server configuration
+   - OpenWebUI will automatically handle JWT token forwarding
+
+4. Usage:
+   - Users authenticate through OpenWebUI's normal login flow
+   - JWT tokens are automatically validated by MCPO
+   - Tools are dynamically discovered based on user authentication
+   - Each user gets isolated sessions and tool access
 
 ## Implementation Details
 
