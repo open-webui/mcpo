@@ -191,8 +191,8 @@ class MultiUserOAuthManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
 
-    def _extract_user_id_from_jwt(self, request: Request) -> Optional[str]:
-        """Extract user ID from JWT token in Authorization header"""
+    def _extract_user_id_from_jwt(self, request: Request, webui_secret_key: Optional[str] = None) -> Optional[str]:
+        """Extract user ID from JWT token in Authorization header with optional signature verification"""
         auth_header = request.headers.get("authorization")
         if not auth_header:
             return None
@@ -204,9 +204,21 @@ class MultiUserOAuthManager:
         token = auth_header[7:]  # Remove "Bearer " prefix
         
         try:
-            # Decode JWT without verification for now (Open-WebUI should handle verification)
-            # In production, you might want to verify with a shared secret
-            decoded = jwt.decode(token, options={"verify_signature": False})
+            # Use signature verification if webui_secret_key is provided
+            if webui_secret_key:
+                # Verify JWT signature using the shared secret key with HS256 algorithm
+                decoded = jwt.decode(
+                    token, 
+                    webui_secret_key, 
+                    algorithms=["HS256"],
+                    options={"verify_exp": True}  # Also verify expiration
+                )
+                logger.info("JWT signature verification successful")
+            else:
+                # Fallback to no verification for backward compatibility
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                logger.debug("JWT processed without signature verification (no webui_secret_key provided)")
+            
             user_id = decoded.get("id")
             
             if user_id:
@@ -216,6 +228,12 @@ class MultiUserOAuthManager:
                 logger.warning("JWT token does not contain 'id' field")
                 return None
                 
+        except jwt.ExpiredSignatureError:
+            logger.warning("JWT token has expired")
+            return None
+        except jwt.InvalidSignatureError:
+            logger.warning("JWT token has invalid signature")
+            return None
         except jwt.InvalidTokenError as e:
             logger.warning(f"Invalid JWT token: {e}")
             return None
@@ -226,7 +244,8 @@ class MultiUserOAuthManager:
 
     async def get_or_create_session(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> UserSession:
         """Get or create a user session for the specified server"""
-        user_id = self._extract_user_id_from_jwt(request)
+        webui_secret_key = oauth_config.get("webui_secret_key")
+        user_id = self._extract_user_id_from_jwt(request, webui_secret_key)
         
         if not user_id:
             raise HTTPException(status_code=401, detail="No valid JWT token found in Authorization header")
@@ -245,9 +264,10 @@ class MultiUserOAuthManager:
             session.update_activity()
             return session
 
-    async def get_session(self, request: Request, server_name: str) -> Optional[UserSession]:
+    async def get_session(self, request: Request, server_name: str, oauth_config: Optional[Dict[str, Any]] = None) -> Optional[UserSession]:
         """Get existing user session"""
-        user_id = self._extract_user_id_from_jwt(request)
+        webui_secret_key = oauth_config.get("webui_secret_key") if oauth_config else None
+        user_id = self._extract_user_id_from_jwt(request, webui_secret_key)
         
         if not user_id:
             return None
@@ -314,10 +334,11 @@ class MultiUserOAuthManager:
             self._cleanup_task = None
             logger.info("Stopped OAuth session cleanup task")
 
-    async def get_session_status(self, request: Request, server_name: str) -> Dict[str, Any]:
+    async def get_session_status(self, request: Request, server_name: str, oauth_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Get the authentication status for a user session"""
-        session = await self.get_session(request, server_name)
-        user_id = self._extract_user_id_from_jwt(request)
+        session = await self.get_session(request, server_name, oauth_config)
+        webui_secret_key = oauth_config.get("webui_secret_key") if oauth_config else None
+        user_id = self._extract_user_id_from_jwt(request, webui_secret_key)
 
         if not session or not user_id:
             return {
@@ -336,9 +357,10 @@ class MultiUserOAuthManager:
             "last_activity": session.last_activity.isoformat() + "Z"
         }
 
-    async def clear_user_session_auth(self, request: Request, server_name: str) -> None:
+    async def clear_user_session_auth(self, request: Request, server_name: str, oauth_config: Optional[Dict[str, Any]] = None) -> None:
         """Clear authentication state for a user session when tokens become invalid"""
-        user_id = self._extract_user_id_from_jwt(request)
+        webui_secret_key = oauth_config.get("webui_secret_key") if oauth_config else None
+        user_id = self._extract_user_id_from_jwt(request, webui_secret_key)
         
         if not user_id:
             return

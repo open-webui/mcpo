@@ -473,7 +473,7 @@ async def lifespan(app: FastAPI):
                         # Check if user is authenticated
                         from mcpo.utils.multiuser_oauth import oauth_manager
 
-                        user_session = await oauth_manager.get_session(request, server_name)
+                        user_session = await oauth_manager.get_session(request, server_name, oauth_config)
                         logger.info(f"User session found: {user_session is not None}, authenticated: {user_session.is_authenticated if user_session else False}")
 
                         if user_session and user_session.is_authenticated:

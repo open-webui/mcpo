@@ -45,7 +45,7 @@ class OAuthEndpoints:
         try:
             # Clean up expired flows on each OAuth initiation
             self._cleanup_expired_flows()
-            
+
             session, needs_auth = await require_oauth_session(request, server_name, oauth_config)
 
             if not needs_auth:
@@ -64,7 +64,7 @@ class OAuthEndpoints:
 
             # Generate state for CSRF protection
             state = secrets.token_urlsafe(32)
-            
+
             # Generate PKCE parameters if required
             code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
             code_challenge = base64.urlsafe_b64encode(
@@ -79,7 +79,7 @@ class OAuthEndpoints:
                 "code_verifier": code_verifier,  # Store for token exchange
                 "created_at": time.time()  # TTL tracking
             }
-            
+
             # Clean up expired flows (older than 10 minutes)
             self._cleanup_expired_flows()
 
@@ -97,8 +97,6 @@ class OAuthEndpoints:
 
             try:
                 # The provider will handle discovery and dynamic client registration
-                # We need to start the OAuth flow by calling the provider's internal methods
-
                 # Perform discovery using the MCP SDK pattern
                 async with httpx.AsyncClient() as client:
                     # Discover OAuth configuration using RFC 9728
@@ -143,7 +141,7 @@ class OAuthEndpoints:
                                     # Update the client metadata with the registered redirect URIs if provided
                                     if "redirect_uris" in client_info:
                                         session.client_metadata.redirect_uris = [AnyUrl(uri) for uri in client_info["redirect_uris"]]
-                                    
+
                                 oauth_client_info = OAuthClientInformationFull(
                                     client_id=client_info["client_id"],
                                     client_secret=client_info.get("client_secret", ""),  # Some servers don't return secret
@@ -162,13 +160,13 @@ class OAuthEndpoints:
                                     "state": state,
                                     "scope": oauth_config.get("scope", "openid profile email")  # Use configured or default scopes
                                 }
-                                
+
                                 # Add PKCE parameters if required
                                 if auth_config.get("pkce_required", False):
                                     auth_params["code_challenge"] = code_challenge
                                     auth_params["code_challenge_method"] = "S256"
                                     logger.info("Adding PKCE parameters to authorization request")
-                                
+
                                 auth_url = f"{auth_endpoint}?{urlencode(auth_params)}"
                             else:
                                 logger.error(f"Dynamic client registration failed: {reg_response.status_code}")
@@ -183,13 +181,13 @@ class OAuthEndpoints:
                                 "state": state,
                                 "scope": oauth_config.get("scope", "openid profile email")
                             }
-                            
+
                             # Add PKCE parameters if required
                             if auth_config.get("pkce_required", False):
                                 auth_params["code_challenge"] = code_challenge
                                 auth_params["code_challenge_method"] = "S256"
                                 logger.info("Adding PKCE parameters to authorization request")
-                            
+
                             auth_url = f"{auth_endpoint}?{urlencode(auth_params)}"
                     else:
                         logger.error(f"OAuth discovery failed: {discovery_response.status_code}")
@@ -320,7 +318,7 @@ class OAuthEndpoints:
                         "client_id": client_info.client_id if client_info else "mcpo-client",
                         "client_secret": client_info.client_secret if client_info else ""
                     }
-                    
+
                     # Add PKCE code_verifier if it was used
                     if flow_info.get("code_verifier"):
                         token_data["code_verifier"] = flow_info["code_verifier"]
@@ -442,7 +440,7 @@ class OAuthEndpoints:
         await provider.storage.set_client_info(client_info)
 
         return client_info
-    
+
     def _cleanup_expired_flows(self) -> None:
         """Remove OAuth flows older than 10 minutes to prevent memory leaks"""
         cutoff = time.time() - 600  # 10 minutes
@@ -450,10 +448,10 @@ class OAuthEndpoints:
             state for state, flow in self._oauth_flows.items()
             if flow.get('created_at', 0) < cutoff
         ]
-        
+
         for state in expired_states:
             del self._oauth_flows[state]
-            
+
         if expired_states:
             logger.info(f"Cleaned up {len(expired_states)} expired OAuth flows")
 

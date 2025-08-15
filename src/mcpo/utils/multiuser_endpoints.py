@@ -36,7 +36,8 @@ class MultiUserEndpointManager:
                                        oauth_config: Dict[str, Any], server_url: str,
                                        headers: Optional[Dict[str, str]] = None) -> tuple:
         """Get or create a user-specific MCP session context and OAuth session"""
-        user_id = oauth_manager._generate_user_id(request)
+        webui_secret_key = oauth_config.get("webui_secret_key") if oauth_config else None
+        user_id = oauth_manager._extract_user_id_from_jwt(request, webui_secret_key)
 
         async with self._session_lock:
             # Check if user already has a session for this server
@@ -94,11 +95,12 @@ class MultiUserEndpointManager:
 
     async def _execute_authenticated_tool(self, request: Request, server_name: str, server_url: str,
                                         headers: Optional[Dict[str, str]], endpoint_name: str,
-                                        args: Optional[Dict] = None) -> Any:
+                                        args: Optional[Dict] = None, oauth_config: Optional[Dict[str, Any]] = None) -> Any:
         """Execute a tool with authenticated user session"""
         # Get the user session
-        user_id = oauth_manager._generate_user_id(request)
-        user_session = await oauth_manager.get_session(request, server_name)
+        webui_secret_key = oauth_config.get("webui_secret_key") if oauth_config else None
+        user_id = oauth_manager._extract_user_id_from_jwt(request, webui_secret_key)
+        user_session = await oauth_manager.get_session(request, server_name, oauth_config)
 
         if not user_session or not user_session.is_authenticated:
             raise HTTPException(
@@ -140,7 +142,7 @@ class MultiUserEndpointManager:
                     if is_401_error:
                         logger.warning(f"Token authentication failed during tool execution (401), clearing authentication state: {e}")
                         # Clear authentication state for this user/server
-                        await oauth_manager.clear_user_session_auth(request, server_name)
+                        await oauth_manager.clear_user_session_auth(request, server_name, oauth_config)
                         # Also clear the endpoint manager's cache
                         await self.clear_user_session_cache(user_id, server_name)
 
@@ -179,7 +181,7 @@ class MultiUserEndpointManager:
                     if is_401_error:
                         logger.warning(f"Token authentication failed during tool call (401), clearing authentication state: {e}")
                         # Clear authentication state for this user/server
-                        await oauth_manager.clear_user_session_auth(request, server_name)
+                        await oauth_manager.clear_user_session_auth(request, server_name, oauth_config)
                         # Also clear the endpoint manager's cache
                         await self.clear_user_session_cache(user_id, server_name)
 
@@ -246,7 +248,7 @@ class MultiUserEndpointManager:
                     try:
                         args = form_data.model_dump(exclude_none=True, by_alias=True)
                         return await self._execute_authenticated_tool(
-                            request, server_name, server_url, headers, endpoint_name, args
+                            request, server_name, server_url, headers, endpoint_name, args, oauth_config
                         )
                     except HTTPException:
                         raise
@@ -263,7 +265,7 @@ class MultiUserEndpointManager:
                 async def user_tool_no_args(request: Request):
                     try:
                         return await self._execute_authenticated_tool(
-                            request, server_name, server_url, headers, endpoint_name
+                            request, server_name, server_url, headers, endpoint_name, oauth_config=oauth_config
                         )
                     except HTTPException:
                         raise
