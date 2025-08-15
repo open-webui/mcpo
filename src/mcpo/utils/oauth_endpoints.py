@@ -35,11 +35,6 @@ class OAuthEndpoints:
         try:
             status = await oauth_manager.get_session_status(request, server_name)
             response = JSONResponse(content=status)
-            
-            # Set session cookie if new UUID was generated
-            if hasattr(request.state, 'new_session_uuid'):
-                oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
-            
             return response
         except Exception as e:
             logger.error(f"Error getting OAuth status for {server_name}: {e}")
@@ -60,11 +55,6 @@ class OAuthEndpoints:
                     "authenticated": True,
                     "server": server_name
                 })
-                
-                # Set session cookie if new UUID was generated
-                if hasattr(request.state, 'new_session_uuid'):
-                    oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
-                
                 return response
 
             logger.info(f"OAuth initiation requested for user {session.user_id[:8]}, server {server_name}")
@@ -224,11 +214,6 @@ class OAuthEndpoints:
                     "authorization_url": auth_url,
                     "server": server_name
                 }, status_code=401)
-            
-            # Set session cookie if new UUID was generated
-            if hasattr(request.state, 'new_session_uuid'):
-                oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
-            
             return response
 
         except Exception as e:
@@ -373,11 +358,6 @@ class OAuthEndpoints:
                             action_text="You can safely close this browser tab and return to your application."
                         )
                         response = HTMLResponse(content=html)
-                        
-                        # Set session cookie if new UUID was generated
-                        if hasattr(request.state, 'new_session_uuid'):
-                            oauth_manager._set_session_cookie(response, request.state.new_session_uuid)
-                        
                         return response
                     else:
                         error_detail = token_response.text

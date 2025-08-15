@@ -1,13 +1,12 @@
 import asyncio
 import logging
 import time
-import uuid
+import jwt
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlencode
-import weakref
 
-from fastapi import Request, HTTPException, Response
+from fastapi import Request, HTTPException
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -192,48 +191,45 @@ class MultiUserOAuthManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
 
-    def _generate_user_id(self, request: Request) -> str:
-        """Generate a secure unique user ID using random UUID stored in cookie"""
-        # Check if user already has a session UUID in cookies
-        session_uuid = request.cookies.get("mcpo_session_id")
+    def _extract_user_id_from_jwt(self, request: Request) -> Optional[str]:
+        """Extract user ID from JWT token in Authorization header"""
+        auth_header = request.headers.get("authorization")
+        if not auth_header:
+            return None
+            
+        # Check if it's a Bearer token
+        if not auth_header.startswith("Bearer "):
+            return None
+            
+        token = auth_header[7:]  # Remove "Bearer " prefix
         
-        if session_uuid:
-            # Validate UUID format to prevent manipulation
-            try:
-                uuid.UUID(session_uuid)
-                return session_uuid
-            except ValueError:
-                # Invalid UUID in cookie, generate new one
-                pass
-        
-        # Generate new cryptographically secure UUID
-        new_uuid = str(uuid.uuid4())
-        logger.info(f"Generated new session UUID: {new_uuid[:8]}...")
-        return new_uuid
+        try:
+            # Decode JWT without verification for now (Open-WebUI should handle verification)
+            # In production, you might want to verify with a shared secret
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            user_id = decoded.get("id")
+            
+            if user_id:
+                logger.info(f"Extracted user ID from JWT: {user_id[:8]}...")
+                return user_id
+            else:
+                logger.warning("JWT token does not contain 'id' field")
+                return None
+                
+        except jwt.InvalidTokenError as e:
+            logger.warning(f"Invalid JWT token: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error decoding JWT token: {e}")
+            return None
     
-    def _set_session_cookie(self, response: Response, user_id: str) -> None:
-        """Set secure session cookie in response"""
-        response.set_cookie(
-            key="mcpo_session_id",
-            value=user_id,
-            max_age=86400 * 7,  # 7 days
-            httponly=True,
-            secure=True,  # HTTPS only in production
-            samesite="lax"
-        )
 
     async def get_or_create_session(self, request: Request, server_name: str, oauth_config: Dict[str, Any]) -> UserSession:
         """Get or create a user session for the specified server"""
-        user_id = self._generate_user_id(request)
+        user_id = self._extract_user_id_from_jwt(request)
         
-        # Set secure cookie if this is a new UUID (not already in cookies)
-        if not request.cookies.get("mcpo_session_id"):
-            # Note: The cookie will be set in the response by the calling code
-            # We store the UUID so it can be set in the response headers
-            if hasattr(request.state, 'new_session_uuid'):
-                request.state.new_session_uuid = user_id
-            else:
-                setattr(request.state, 'new_session_uuid', user_id)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="No valid JWT token found in Authorization header")
 
         async with self._lock:
             if user_id not in self._user_sessions:
@@ -251,7 +247,10 @@ class MultiUserOAuthManager:
 
     async def get_session(self, request: Request, server_name: str) -> Optional[UserSession]:
         """Get existing user session"""
-        user_id = self._generate_user_id(request)
+        user_id = self._extract_user_id_from_jwt(request)
+        
+        if not user_id:
+            return None
 
         async with self._lock:
             user_sessions = self._user_sessions.get(user_id, {})
@@ -318,13 +317,13 @@ class MultiUserOAuthManager:
     async def get_session_status(self, request: Request, server_name: str) -> Dict[str, Any]:
         """Get the authentication status for a user session"""
         session = await self.get_session(request, server_name)
-        user_id = self._generate_user_id(request)
+        user_id = self._extract_user_id_from_jwt(request)
 
-        if not session:
+        if not session or not user_id:
             return {
                 "authenticated": False,
                 "server": server_name,
-                "user_id": user_id[:8] + "...",  # Partial user ID for privacy
+                "user_id": user_id[:8] + "..." if user_id else "unknown",  # Partial user ID for privacy
                 "session_created": None,
                 "last_activity": None
             }
@@ -339,7 +338,10 @@ class MultiUserOAuthManager:
 
     async def clear_user_session_auth(self, request: Request, server_name: str) -> None:
         """Clear authentication state for a user session when tokens become invalid"""
-        user_id = self._generate_user_id(request)
+        user_id = self._extract_user_id_from_jwt(request)
+        
+        if not user_id:
+            return
         
         async with self._lock:
             user_sessions = self._user_sessions.get(user_id, {})

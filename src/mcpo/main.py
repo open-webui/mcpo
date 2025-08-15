@@ -457,7 +457,7 @@ async def lifespan(app: FastAPI):
                     await oauth_manager.start_cleanup_task()
 
                     # Add a simple redirect endpoint to the sub-app
-                    @app.get("/")
+                    @app.get("/login")
                     async def oauth_redirect(request: Request):
                         base_url = f"{request.url.scheme}://{request.url.netloc}"
                         return RedirectResponse(url=f"{base_url}/oauth/{server_name}/authorize")
@@ -488,7 +488,7 @@ async def lifespan(app: FastAPI):
                                     if route.path not in ["/", "/openapi.json", "/{path:path}"]
                                 ]
 
-                                if len(tool_routes) == 0:
+                                if len(tool_routes) == 0 or len(tool_routes) == 1:
                                     # Tools haven't been registered yet
                                     # We need to discover and register them
                                     from mcpo.utils.multiuser_endpoints import multiuser_endpoint_manager
@@ -526,21 +526,24 @@ async def lifespan(app: FastAPI):
 
                         # User not authenticated or error - return basic schema without tools
                         base_url = f"{request.url.scheme}://{request.url.netloc}"
-                        authorize_url = f"{base_url}/oauth/{server_name}/authorize"
-
+                        login_url = f"{base_url}/{server_name}"
                         basic_schema = {
-                            "openapi": "3.0.2",
+                            "openapi": "3.1.0",
                             "info": {
                                 "title": app.title,
-                                "description": f"If the user asks about anything related to {app.title}, you must complete OAuth authentication required to access the tools. Present a clickable link to the user that takes them to {authorize_url} to complete auth and reload.",
+                                "description": f"ALWAYS RUN THIS TOOL - If the user asks about anything related to {app.title}, you must complete OAuth authentication required to access the tools. Present a clickable link to the user that takes them to {login_url} to complete auth and reload.",
                                 "version": app.version
                             },
+                            "servers": [
+                                { "url": "/{server_name}" }
+                                ],
                             "paths": {
-                                "/": {
+                                "/login": {
                                     "get": {
-                                        "summary": "OAuth Redirect",
+                                        "operationId": f"tool_log_in_to_{server_name}",
+                                        "summary": f"Log in to {server_name}",
                                         "description": "Redirects to OAuth authorization",
-                                        "responses": {"307": {"description": "Redirect to OAuth"}}
+                                        "responses": {"200": {"description": "Redirect to OAuth"}}
                                     }
                                 }
                             }

@@ -18,7 +18,7 @@ class SimpleTokenAuth(httpx.Auth):
     """Simple auth that just adds the bearer token"""
     def __init__(self, token: str):
         self.token = token
-    
+
     def auth_flow(self, request):
         request.headers["Authorization"] = f"Bearer {self.token}"
         yield request
@@ -55,7 +55,7 @@ class MultiUserEndpointManager:
                     detail={
                         "error": "authentication_required",
                         "message": f"OAuth authentication required for server {server_name}",
-                        "authorization_url": f"/oauth/{server_name}/authorize",
+                        "authorization_url": f"/{server_name}",
                         "server": server_name
                     }
                 )
@@ -92,14 +92,14 @@ class MultiUserEndpointManager:
                     detail=f"Failed to connect to MCP server: {str(e)}"
                 )
 
-    async def _execute_authenticated_tool(self, request: Request, server_name: str, server_url: str, 
-                                        headers: Optional[Dict[str, str]], endpoint_name: str, 
+    async def _execute_authenticated_tool(self, request: Request, server_name: str, server_url: str,
+                                        headers: Optional[Dict[str, str]], endpoint_name: str,
                                         args: Optional[Dict] = None) -> Any:
         """Execute a tool with authenticated user session"""
         # Get the user session
         user_id = oauth_manager._generate_user_id(request)
         user_session = await oauth_manager.get_session(request, server_name)
-        
+
         if not user_session or not user_session.is_authenticated:
             raise HTTPException(
                 status_code=401,
@@ -110,19 +110,19 @@ class MultiUserEndpointManager:
                     "server": server_name
                 }
             )
-        
+
         # Get the access token
         tokens = await user_session.token_storage.get_tokens()
         if not tokens or not tokens.access_token:
             raise HTTPException(status_code=401, detail="No valid access token")
-        
+
         # Create a new MCP session for this request with simple token auth
         client_context = streamablehttp_client(
             url=server_url,
             headers=headers,
             auth=SimpleTokenAuth(tokens.access_token)
         )
-        
+
         async with client_context as (reader, writer, *_):
             async with ClientSession(reader, writer) as session:
                 # Initialize the session first
@@ -136,28 +136,28 @@ class MultiUserEndpointManager:
                     else:
                         error_msg = str(e).lower()
                         is_401_error = "401" in error_msg or "unauthorized" in error_msg
-                        
+
                     if is_401_error:
                         logger.warning(f"Token authentication failed during tool execution (401), clearing authentication state: {e}")
                         # Clear authentication state for this user/server
                         await oauth_manager.clear_user_session_auth(request, server_name)
                         # Also clear the endpoint manager's cache
                         await self.clear_user_session_cache(user_id, server_name)
-                        
+
                         # Re-raise as authentication required error
                         raise HTTPException(
                             status_code=401,
                             detail={
                                 "error": "token_expired",
                                 "message": f"Authentication token expired for server {server_name}. Please re-authenticate.",
-                                "authorization_url": f"/oauth/{server_name}/authorize",
+                                "authorization_url": f"/{server_name}",
                                 "server": server_name
                             }
                         )
                     else:
                         # Re-raise other errors as-is
                         raise
-                
+
                 # Execute the tool
                 tool_args = args or {}
                 if args:
@@ -175,14 +175,14 @@ class MultiUserEndpointManager:
                     else:
                         error_msg = str(e).lower()
                         is_401_error = "401" in error_msg or "unauthorized" in error_msg
-                        
+
                     if is_401_error:
                         logger.warning(f"Token authentication failed during tool call (401), clearing authentication state: {e}")
                         # Clear authentication state for this user/server
                         await oauth_manager.clear_user_session_auth(request, server_name)
                         # Also clear the endpoint manager's cache
                         await self.clear_user_session_cache(user_id, server_name)
-                        
+
                         # Re-raise as authentication required error
                         raise HTTPException(
                             status_code=401,
@@ -287,20 +287,20 @@ class MultiUserEndpointManager:
             # We MUST have an authenticated user session to discover tools
             if not user_session or not user_session.is_authenticated:
                 raise ValueError("Authenticated user session required for tool discovery")
-            
+
             # Check if we have valid tokens
             if not user_session.token_storage:
                 raise ValueError("No token storage available")
-                
+
             tokens = await user_session.token_storage.get_tokens()
             if not tokens or not tokens.access_token:
                 raise ValueError("No valid access token available")
-            
+
             logger.info("Using existing access token for tool discovery")
-            
+
             # Use the MCP SDK's streamablehttp_client with simple token auth
             from contextlib import AsyncExitStack
-            
+
             try:
                 async with AsyncExitStack() as stack:
                     # Create the client with simple token authentication
@@ -309,17 +309,17 @@ class MultiUserEndpointManager:
                         headers=headers,
                         auth=SimpleTokenAuth(tokens.access_token)
                     )
-                    
+
                     # Enter the client context
                     reader, writer, *_ = await stack.enter_async_context(client_context)
-                    
+
                     # Create MCP session
                     session = await stack.enter_async_context(ClientSession(reader, writer))
-                    
+
                     # Initialize the session
                     logger.info("Initializing MCP session for tool discovery...")
                     result = await session.initialize()
-                    
+
                     # Extract server info if available
                     server_info = getattr(result, "serverInfo", None)
                     if server_info:
@@ -327,12 +327,12 @@ class MultiUserEndpointManager:
                         app.description = f"{server_info.name} MCP Server" if server_info.name else app.description
                         app.version = server_info.version or app.version
                         logger.info(f"Server info: {server_info.name} v{server_info.version}")
-                    
+
                     # List tools
                     logger.info("Listing available tools...")
                     tools_result = await session.list_tools()
                     tools = tools_result.tools
-                    
+
                     logger.info(f"Found {len(tools)} tools")
 
                     # Create user-aware tool handler factory
@@ -380,7 +380,7 @@ class MultiUserEndpointManager:
                         logger.info(f"Registered multi-user endpoint: {endpoint_name} for server {server_name}")
 
                     logger.info(f"Multi-user OAuth server setup complete: {server_name} with {len(tools)} tools")
-                    
+
             except (ExceptionGroup, BaseExceptionGroup) as eg:
                 # Handle ExceptionGroup that wraps HTTPStatusError from MCP client
                 http_401_error = None
@@ -388,7 +388,7 @@ class MultiUserEndpointManager:
                     if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401:
                         http_401_error = exc
                         break
-                
+
                 if http_401_error:
                     logger.warning(f"Token authentication failed (401) during tool discovery, clearing authentication state: {http_401_error}")
                     # Clear authentication state for this user/server
@@ -398,7 +398,7 @@ class MultiUserEndpointManager:
                 else:
                     # Re-raise the original exception group if it's not a 401 error
                     raise
-                    
+
             except httpx.HTTPStatusError as e:
                 # Handle direct HTTPStatusError (just in case)
                 if e.response.status_code == 401:
