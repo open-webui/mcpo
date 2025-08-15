@@ -9,14 +9,18 @@ from typing import Optional, Dict, Any
 from urllib.parse import urljoin
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse, RedirectResponse
+
 from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+
 
 from mcpo.utils.auth import APIKeyMiddleware, get_verify_api_key
 from mcpo.utils.main import (
@@ -108,7 +112,7 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
     # Check if this is a multi-user OAuth server
     oauth_config = server_cfg.get("oauth")
     is_multi_user_oauth = oauth_config and oauth_config.get("multi_user", True)
-    
+
     sub_app = FastAPI(
         title=f"{server_name}",
         description=f"{server_name} MCP Server\n\n- [back to tool list](/docs)",
@@ -165,7 +169,6 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
 
 def add_oauth_endpoints_to_main_app(main_app: FastAPI, server_name: str, oauth_config: Dict[str, Any]):
     """Add OAuth endpoints to the main app for a server with multi-user support"""
-    from fastapi import Request
 
     @main_app.get(f"/oauth/{server_name}/status")
     async def oauth_status(request: Request):
@@ -454,32 +457,25 @@ async def lifespan(app: FastAPI):
                     await oauth_manager.start_cleanup_task()
 
                     # Add a simple redirect endpoint to the sub-app
-                    from fastapi import Request
-                    from fastapi.responses import RedirectResponse
-
                     @app.get("/")
                     async def oauth_redirect(request: Request):
                         base_url = f"{request.url.scheme}://{request.url.netloc}"
                         return RedirectResponse(url=f"{base_url}/oauth/{server_name}/authorize")
 
                     # The automatic OpenAPI has already been disabled in create_sub_app
-                    # Now we just need to add our custom handler
-                    
                     # Add our custom OpenAPI generation
-                    from fastapi.openapi.utils import get_openapi
-                    from fastapi.responses import JSONResponse
-                    
+
                     @app.get("/openapi.json", include_in_schema=False)
                     async def custom_openapi(request: Request):
                         """Generate OpenAPI schema dynamically based on user's authentication status"""
                         logger.info(f"Custom OpenAPI handler called for {server_name}")
-                        
+
                         # Check if user is authenticated
                         from mcpo.utils.multiuser_oauth import oauth_manager
-                        
+
                         user_session = await oauth_manager.get_session(request, server_name)
                         logger.info(f"User session found: {user_session is not None}, authenticated: {user_session.is_authenticated if user_session else False}")
-                        
+
                         if user_session and user_session.is_authenticated:
                             # User is authenticated, generate schema with tools
                             # We need to dynamically discover and add the tools
@@ -488,18 +484,18 @@ async def lifespan(app: FastAPI):
                                 # Check if we need to discover tools for this app
                                 # Count non-system routes (exclude /, /openapi.json)
                                 tool_routes = [
-                                    route for route in app.routes 
+                                    route for route in app.routes
                                     if route.path not in ["/", "/openapi.json", "/{path:path}"]
                                 ]
-                                
+
                                 if len(tool_routes) == 0:
                                     # Tools haven't been registered yet
                                     # We need to discover and register them
                                     from mcpo.utils.multiuser_endpoints import multiuser_endpoint_manager
-                                    
+
                                     server_url = getattr(app.state, "server_url", None)
                                     headers = getattr(app.state, "headers", None)
-                                    
+
                                     if server_url:
                                         logger.info(f"Discovering MCP tools for authenticated user at {server_url}")
                                         # This will discover tools and register endpoints
@@ -507,10 +503,10 @@ async def lifespan(app: FastAPI):
                                             app, server_name, oauth_config, server_url, headers, user_session
                                         )
                                         logger.info(f"Successfully registered {len(app.routes) - 2} tool endpoints")
-                                
+
                                 # Clear any cached schema to force regeneration
                                 app.openapi_schema = None
-                                
+
                                 # Generate OpenAPI schema with all registered routes
                                 openapi_schema = get_openapi(
                                     title=app.title,
@@ -518,22 +514,25 @@ async def lifespan(app: FastAPI):
                                     description=app.description,
                                     routes=app.routes,
                                 )
-                                
+
                                 logger.info(f"Generated OpenAPI schema with {len(openapi_schema.get('paths', {}))} paths")
                                 return JSONResponse(openapi_schema)
-                                
+
                             except Exception as e:
                                 import traceback
                                 logger.error(f"Error generating OpenAPI schema for authenticated user: {e}")
                                 logger.error(f"Traceback: {traceback.format_exc()}")
                                 # Fall back to basic schema
-                        
+
                         # User not authenticated or error - return basic schema without tools
+                        base_url = f"{request.url.scheme}://{request.url.netloc}"
+                        authorize_url = f"{base_url}/oauth/{server_name}/authorize"
+
                         basic_schema = {
                             "openapi": "3.0.2",
                             "info": {
                                 "title": app.title,
-                                "description": "OAuth authentication required to access MCP tools",
+                                "description": f"If the user asks about anything related to {app.title}, you must complete OAuth authentication required to access the tools. Present a clickable link to the user that takes them to {authorize_url} to complete auth and reload.",
                                 "version": app.version
                             },
                             "paths": {
@@ -546,6 +545,7 @@ async def lifespan(app: FastAPI):
                                 }
                             }
                         }
+
                         return JSONResponse(basic_schema)
 
                     # For multi-user OAuth, we skip the traditional connection setup
