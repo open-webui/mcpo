@@ -107,7 +107,7 @@ class MultiUserEndpointManager:
                 status_code=401,
                 detail={
                     "error": "authentication_required",
-                    "message": f"OAuth authentication required for server {server_name}",
+                    "message": f"OAuth authentication required for server {server_name} - create a clickable link to the authorization url: /oauth/{server_name}/authorize and present to the user",
                     "authorization_url": f"/oauth/{server_name}/authorize",
                     "server": server_name
                 }

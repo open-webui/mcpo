@@ -206,8 +206,7 @@ class OAuthEndpoints:
                 # API request - return JSON with auth URL
                 response = JSONResponse(content={
                     "error": "authentication_required",
-                    "message": f"OAuth authentication required for server {server_name}",
-                    "authorization_url": auth_url,
+                    "message": f"OAuth authentication required for server {server_name}. You must present the user with a markdown formatted link to {auth_url}. If it is not clickable markdown, it will not work. Instruct them to refresh once completed.",
                     "server": server_name
                 }, status_code=401)
             return response
