@@ -26,8 +26,8 @@ ENV VIRTUAL_ENV=/app/.venv
 RUN uv venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Install mcpo (assuming pyproject.toml is properly configured)
-RUN uv pip install . && rm -rf ~/.cache
+# Install mcpo and all MCP server dependencies
+RUN uv pip install . mem0ai google-api-python-client google-auth-httplib2 google-auth-oauthlib playwright browser-use aiohttp python-dotenv && rm -rf ~/.cache
 
 # Verify mcpo installed correctly
 RUN which mcpo
@@ -38,5 +38,5 @@ EXPOSE 8000
 # Entrypoint set for easy container invocation
 ENTRYPOINT ["mcpo"]
 
-# Default help CMD (can override at runtime)
-CMD ["--help"]
+# Start mcpo with config file
+CMD ["--config", "/app/config.json", "--port", "8000", "--host", "0.0.0.0"]
