@@ -8,4 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
-config.json
+
+# Credentials (use environment variables instead)
+client_secrets.json

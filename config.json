@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+    },
+    "combinedmemory-server": {
+      "command": "python",
+      "args": ["/app/mcp_server.py"]
+    },
+    "gsc-server": {
+      "command": "python",
+      "args": ["/app/gsc_server.py"]
+    },
+    "browser-agent": {
+      "command": "python",
+      "args": ["/app/browser_agent_mcp.py"]
+    }
+  }
+}
