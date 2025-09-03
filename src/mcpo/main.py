@@ -493,6 +493,7 @@ async def run(
     if ssl_keyfile:
         logger.info(f"  SSL Key File: {ssl_keyfile}")
     logger.info(f"  Path Prefix: {path_prefix}")
+    logger.info(f"  Root Path: {root_path}")
 
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()

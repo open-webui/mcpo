@@ -74,6 +74,18 @@ That’s it. Your MCP tool is now available at http://localhost:8000 with a gene
 
 🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/openapi-servers/open-webui/).**
 
+
+### 🌐 Serving Under a Subpath (`--root-path`)
+
+If you need to serve mcpo behind a reverse proxy or under a subpath (e.g., `/api/mcpo`), use the `--root-path` argument:
+
+```bash
+mcpo --port 8000 --root-path "/api/mcpo" --api-key "top-secret" -- your_mcp_server_command
+```
+
+All routes will be served under the specified root path, e.g. `http://localhost:8000/api/mcpo/memory`.
+
+
 ### 🔄 Using a Config File
 
 You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
