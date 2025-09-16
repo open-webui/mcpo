@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import socket
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -268,12 +269,29 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
     if instructions:
         app.description = instructions
 
+    # Determine server name for prefixing
+    server_name = ""
+
+    # Get server name from server info from MCP initialization
+    if server_info and server_info.name:
+        server_name = server_info.name
+    # Get server name from command if available
+    elif hasattr(app.state, 'command'):
+        command = app.state.command
+        if command:
+            server_name = os.path.splitext(os.path.basename(command))[0]
+
+    sanitized_server_name = sanitize_server_name(server_name)
+
     tools_result = await session.list_tools()
     tools = tools_result.tools
 
     for tool in tools:
-        endpoint_name = tool.name
-        endpoint_description = tool.description
+        # Create prefixed endpoint name if server_name not empty
+        endpoint_name = f"{sanitized_server_name}_{tool.name}" if sanitized_server_name else tool.name
+
+        # Add server name to description if server name not empty
+        endpoint_description = f"[{server_name}] {tool.description}" if server_name else tool.description
 
         inputSchema = tool.inputSchema
         outputSchema = getattr(tool, "outputSchema", None)
@@ -308,6 +326,20 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             response_model_exclude_none=True,
             dependencies=[Depends(api_dependency)] if api_dependency else [],
         )(tool_handler)
+
+
+def sanitize_server_name(name: str) -> str:
+    """Convert server name to safe alphanumeric + underscore identifier"""
+    # Replace any non-alphanumeric characters with underscores
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    # Remove multiple consecutive underscores
+    sanitized = re.sub(r'_+', '_', sanitized)
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip('_').lower()
+    # Ensure it doesn't start with a number
+    if sanitized and sanitized[0].isdigit():
+        sanitized = f"server_{sanitized}"
+    return sanitized or ""
 
 
 @asynccontextmanager
