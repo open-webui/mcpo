@@ -270,6 +270,7 @@ def get_tool_handler(
     endpoint_name,
     form_model_fields,
     response_model_fields=None,
+    original_tool_name=None,
 ):
     if form_model_fields:
         FormModel = create_model(f"{endpoint_name}_form_model", **form_model_fields)
@@ -280,13 +281,13 @@ def get_tool_handler(
         )
 
         def make_endpoint_func(
-            endpoint_name: str, FormModel, session: ClientSession
+            endpoint_name: str, FormModel, session: ClientSession, original_tool_name: str
         ):  # Parameterized endpoint
             async def tool(form_data: FormModel) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
                 logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
                 try:
-                    result = await session.call_tool(endpoint_name, arguments=args)
+                    result = await session.call_tool(original_tool_name, arguments=args)
 
                     if result.isError:
                         error_message = "Unknown tool execution error"
@@ -332,17 +333,17 @@ def get_tool_handler(
 
             return tool
 
-        tool_handler = make_endpoint_func(endpoint_name, FormModel, session)
+        tool_handler = make_endpoint_func(endpoint_name, FormModel, session, original_tool_name or endpoint_name)
     else:
 
         def make_endpoint_func_no_args(
-            endpoint_name: str, session: ClientSession
+            endpoint_name: str, session: ClientSession, original_tool_name: str
         ):  # Parameterless endpoint
             async def tool():  # No parameters
                 logger.info(f"Calling endpoint: {endpoint_name}, with no args")
                 try:
                     result = await session.call_tool(
-                        endpoint_name, arguments={}
+                        original_tool_name, arguments={}
                     )  # Empty dict
 
                     if result.isError:
@@ -387,6 +388,6 @@ def get_tool_handler(
 
             return tool
 
-        tool_handler = make_endpoint_func_no_args(endpoint_name, session)
+        tool_handler = make_endpoint_func_no_args(endpoint_name, session, original_tool_name or endpoint_name)
 
     return tool_handler
