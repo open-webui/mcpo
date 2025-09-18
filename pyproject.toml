@@ -10,8 +10,8 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1.8",
     "fastapi>=0.115.12",
-    "mcp>=1.12.1",
-    "mcp[cli]>=1.12.1",
+    "mcp>=1.12.2",
+    "mcp[cli]>=1.12.2",
     "passlib[bcrypt]>=1.7.4",
     "pydantic>=2.11.1",
     "pyjwt[crypto]>=2.10.1",
