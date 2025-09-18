@@ -26,6 +26,7 @@ from mcpo.utils.main import (
 )
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.utils.headers import validate_client_header_forwarding_config
+from mcpo.utils.oauth import create_oauth_provider
 
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,9 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
     
     # Store client header forwarding configuration
     sub_app.state.client_header_forwarding = server_cfg.get("client_header_forwarding", {"enabled": False})
+
+    # Store OAuth configuration if present
+    sub_app.state.oauth_config = server_cfg.get("oauth")
 
     return sub_app
 
@@ -410,7 +414,28 @@ async def lifespan(app: FastAPI):
         # This is a sub-app's lifespan
         app.state.is_connected = False
         try:
+            # Check for OAuth configuration
+            oauth_config = getattr(app.state, "oauth_config", None)
+            auth_provider = None
+            
+            if oauth_config:
+                server_name = app.title
+                logger.info(f"OAuth configuration detected for server: {server_name}")
+                try:
+                    auth_provider = await create_oauth_provider(
+                        server_name=server_name,
+                        oauth_config=oauth_config,
+                        storage_type=oauth_config.get("storage_type", "file")
+                    )
+                    logger.info(f"OAuth provider created for server: {server_name}")
+                except Exception as e:
+                    logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
+                    raise
+            
             if server_type == "stdio":
+                # stdio doesn't support OAuth authentication
+                if oauth_config:
+                    logger.warning(f"OAuth not supported for stdio server type")
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,
@@ -418,6 +443,9 @@ async def lifespan(app: FastAPI):
                 )
                 client_context = stdio_client(server_params)
             elif server_type == "sse":
+                # SSE doesn't support OAuth authentication currently
+                if oauth_config:
+                    logger.warning(f"OAuth not supported for SSE server type")
                 headers = getattr(app.state, "headers", None)
                 client_context = sse_client(
                     url=args[0],
@@ -426,7 +454,11 @@ async def lifespan(app: FastAPI):
                 )
             elif server_type == "streamable-http":
                 headers = getattr(app.state, "headers", None)
-                client_context = streamablehttp_client(url=args[0], headers=headers)
+                client_context = streamablehttp_client(
+                    url=args[0], 
+                    headers=headers,
+                    auth=auth_provider,  # Pass OAuth provider if configured
+                )
             else:
                 raise ValueError(f"Unsupported server type: {server_type}")
 
