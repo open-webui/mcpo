@@ -49,13 +49,13 @@ mcpo --port 8000 --api-key "top-secret" --server-type "sse" -- http://127.0.0.1:
 You can also provide headers for the SSE connection:
 
 ```bash
-mcpo --port 8000 --api-key "top-secret" --server-type "sse" --headers '{"Authorization": "Bearer token", "X-Custom-Header": "value"}' -- http://127.0.0.1:8001/sse
+mcpo --port 8000 --api-key "top-secret" --server-type "sse" --header '{"Authorization": "Bearer token", "X-Custom-Header": "value"}' -- http://127.0.0.1:8001/sse
 ```
 
 To use a Streamable HTTP-compatible MCP server, specify the server type and endpoint:
 
 ```bash
-mcpo --port 8000 --api-key "top-secret" --server-type "streamable_http" -- http://127.0.0.1:8002/mcp
+mcpo --port 8000 --api-key "top-secret" --server-type "streamable-http" -- http://127.0.0.1:8002/mcp
 ```
 
 You can also run mcpo via Docker with no installation:
@@ -76,12 +76,20 @@ That’s it. Your MCP tool is now available at http://localhost:8000 with a gene
 
 ### 🔄 Using a Config File
 
-You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format:
+You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
+
+Enable hot-reload mode with `--hot-reload` to automatically watch your config file for changes and reload servers without downtime:
 
 Start via:
 
 ```bash
 mcpo --config /path/to/config.json
+```
+
+Or with hot-reload enabled:
+
+```bash
+mcpo --config /path/to/config.json --hot-reload
 ```
 
 Example config.json:
@@ -106,7 +114,7 @@ Example config.json:
       }
     },
     "mcp_streamable_http": {
-      "type": "streamable_http",
+      "type": "streamable-http",
       "url": "http://127.0.0.1:8002/mcp"
     } // Streamable HTTP MCP Server
   }
@@ -118,6 +126,64 @@ Each tool will be accessible under its own unique route, e.g.:
 - http://localhost:8000/time
 
 Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
+
+### 🔐 OAuth 2.1 Authentication
+
+mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
+
+```json
+{
+  "mcpServers": {
+    "oauth-protected-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+#### OAuth Configuration Options
+
+**Basic Options:**
+- `server_url` (required): OAuth server base URL
+- `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
+- `callback_port`: Local port for OAuth callback (default: 3030)
+- `use_loopback`: Auto-open browser for auth (default: true)
+
+**Advanced Options (rarely needed):**
+For servers that don't support dynamic client registration, you can specify static client metadata:
+
+```json
+{
+  "mcpServers": {
+    "legacy-oauth-server": {
+      "type": "streamable-http", 
+      "url": "http://api.example.com/mcp",
+      "oauth": {
+        "server_url": "http://api.example.com",
+        "client_metadata": {
+          "client_name": "My MCPO Client",
+          "redirect_uris": ["http://localhost:3030/callback"]
+        }
+      }
+    }
+  }
+}
+```
+
+> **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
+
+On first connection, mcpo will:
+1. Perform dynamic client registration (if supported)
+2. Open your browser for authorization
+3. Capture the OAuth callback automatically  
+4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
+5. Use tokens for all subsequent requests
+
+OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
 
 ## 🔧 Requirements
 

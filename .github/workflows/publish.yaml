@@ -1,0 +1,38 @@
+# .github/workflows/publish.yml
+name: Publish Python Package
+
+on:
+    push:
+        branches:
+            - main
+    release:
+        types: [published] # Triggers workflow when a GitHub release is published
+
+permissions:
+    contents: read
+
+jobs:
+    publish:
+        name: Build and Publish to PyPI
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11" # or your required version
+
+            - name: Install uv
+              run: pip install uv
+
+            - name: Build package
+              run: uv build --no-sources
+
+            - name: Publish package to PyPI
+              env:
+                  UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+              run: |
+                  uv publish

@@ -1,0 +1,72 @@
+########################
+#  Version-control
+########################
+.git
+.gitignore
+.gitattributes
+
+########################
+#  Docker artefacts
+########################
+.dockerignore
+Dockerfile
+docker-compose.yml
+.docker/
+
+########################
+#  Python byte-code / Caches
+########################
+**/__pycache__/
+**/*.py[cod]
+*.so                     # compiled C extensions
+.pytest_cache/
+.mypy_cache/
+.nox/
+.tox/
+
+########################
+#  Virtual-envs & deps
+########################
+.venv/
+venv/
+env/
+*.egg-info/
+*.dist-info/
+build/
+dist/
+pip-wheel-metadata/
+
+########################
+#  Testing & coverage
+########################
+.coverage
+htmlcov/
+nosetests.xml
+coverage.xml
+
+########################
+#  Docs & generated reports
+########################
+docs/_build/
+
+########################
+#  IDE / Editor artefacts
+########################
+.idea/
+.vscode/
+.ropeproject/
+**/*.swp  # Vim swap files
+
+########################
+#  Ops / secrets (keep these out of images!)
+########################
+*.env
+.env*
+*.pem
+*.key
+config.json
+########################
+#  OS junk
+########################
+.DS_Store
+Thumbs.db

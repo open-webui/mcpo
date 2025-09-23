@@ -30,6 +30,11 @@ MCP_ERROR_TO_HTTP_STATUS = {
 
 logger = logging.getLogger(__name__)
 
+def normalize_server_type(server_type: str) -> str:
+    """Normalize server_type to a standard value."""
+    if server_type in ["streamable_http", "streamablehttp", "streamable-http"]:
+        return "streamable-http"
+    return server_type
 
 async def register_tools(app: FastAPI, session: ClientSession, dependencies: list[Depends]):
     tools_result = await session.list_tools()
@@ -95,8 +100,8 @@ def process_tool_response(result: CallToolResult) -> list:
 
 
 def name_needs_alias(name: str) -> bool:
-    """Check if a field name needs aliasing (for now if it starts with '__')."""
-    return name.startswith("__")
+    """Check if a field name needs aliasing (if it starts with '_')."""
+    return name.startswith("_")
 
 
 def generate_alias_name(original_name: str, existing_names: set) -> str:
@@ -104,7 +109,7 @@ def generate_alias_name(original_name: str, existing_names: set) -> str:
     Generate an alias field name by stripping unwanted chars, and avoiding conflicts with existing names.
 
     Args:
-        original_name: The original field name (should start with '__')
+        original_name: The original field name (should start with '_')
         existing_names: Set of existing names to avoid conflicts with
 
     Returns:

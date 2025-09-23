@@ -66,6 +66,9 @@ def main(
     headers: Annotated[
         Optional[str], typer.Option("--header", "-H", help="Headers in JSON format")
     ] = None,
+    hot_reload: Annotated[
+        Optional[bool], typer.Option("--hot-reload", help="Enable hot reload for config file changes")
+    ] = False,
 ):
     server_command = None
     if not config_path:
@@ -137,6 +140,7 @@ def main(
             ssl_keyfile=ssl_keyfile,
             path_prefix=path_prefix,
             headers=headers,
+            hot_reload=hot_reload,
         )
     )
 
