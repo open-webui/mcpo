@@ -18,6 +18,8 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
+from mcpo.utils.config_watcher import ConfigWatcher
+from mcpo.utils.normalize_server_type import normalize_server_type
 from mcpo.utils.register_tools import (
     register_tools,
 )
