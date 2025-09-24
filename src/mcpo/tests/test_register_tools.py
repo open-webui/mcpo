@@ -2,7 +2,7 @@ import pytest
 from pydantic import BaseModel, Field
 from typing import Any, List, Dict, Union
 
-from mcpo.utils.main import _process_schema_property
+from mcpo.utils.register_tools import _process_schema_property
 
 
 _model_cache = {}
