@@ -24,9 +24,8 @@ from mcpo.utils.main import (
     get_tool_handler,
     normalize_server_type,
 )
-from mcpo.utils.main import get_model_fields, get_tool_handler
-from mcpo.utils.auth import get_verify_api_key, APIKeyMiddleware
 from mcpo.utils.config_watcher import ConfigWatcher
+from mcpo.utils.headers import validate_client_header_forwarding_config
 from mcpo.utils.oauth import create_oauth_provider
 
 
@@ -85,6 +84,11 @@ def load_config(config_path: str) -> Dict[str, Any]:
         # Validate each server configuration
         for server_name, server_cfg in mcp_servers.items():
             validate_server_config(server_name, server_cfg)
+            
+            # Validate client header forwarding configuration if present
+            header_config = server_cfg.get("client_header_forwarding", {})
+            if header_config:
+                validate_client_header_forwarding_config(server_name, header_config)
 
         return config_data
     except json.JSONDecodeError as e:
@@ -148,6 +152,9 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
     
+    # Store client header forwarding configuration
+    sub_app.state.client_header_forwarding = server_cfg.get("client_header_forwarding", {"enabled": False})
+
     # Store OAuth configuration if present
     sub_app.state.oauth_config = server_cfg.get("oauth")
 
@@ -298,11 +305,15 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
                 outputSchema.get("$defs", {}),
             )
 
+        # Get client header forwarding configuration from app state
+        client_header_forwarding_config = getattr(app.state, "client_header_forwarding", {"enabled": False})
+        
         tool_handler = get_tool_handler(
             session,
             endpoint_name,
             form_model_fields,
             response_model_fields,
+            client_header_forwarding_config,
         )
 
         app.post(
