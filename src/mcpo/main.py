@@ -464,9 +464,18 @@ async def run(
     ssl_keyfile = kwargs.get("ssl_keyfile")
     path_prefix = kwargs.get("path_prefix") or "/"
 
-    # Configure basic logging
+    # Configure logging based on LOG_LEVEL environment variable
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    try:
+        numeric_level = getattr(logging, log_level, None)
+        if not isinstance(numeric_level, int):
+            raise ValueError(f"Invalid log level: {log_level}")
+    except (ValueError, AttributeError):
+        logger.warning(f"Invalid LOG_LEVEL '{log_level}', defaulting to INFO")
+        numeric_level = logging.INFO
+
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+        level=numeric_level, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
     # Suppress HTTP request logs
@@ -588,13 +597,15 @@ async def run(
         config_watcher.start()
 
     logger.info("Uvicorn server starting...")
+    uvicorn_log_level = log_level.lower()
+
     config = uvicorn.Config(
         app=main_app,
         host=host,
         port=port,
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
-        log_level="info",
+        log_level=uvicorn_log_level,
     )
     server = uvicorn.Server(config)
 
