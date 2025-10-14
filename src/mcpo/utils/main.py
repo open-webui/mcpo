@@ -31,11 +31,13 @@ MCP_ERROR_TO_HTTP_STATUS = {
 
 logger = logging.getLogger(__name__)
 
+
 def normalize_server_type(server_type: str) -> str:
     """Normalize server_type to a standard value."""
     if server_type in ["streamable_http", "streamablehttp", "streamable-http"]:
         return "streamable-http"
     return server_type
+
 
 def process_tool_response(result: CallToolResult) -> list:
     """Universal response processor for all tool endpoints"""
@@ -150,7 +152,12 @@ def _process_schema_property(
             temp_schema = dict(prop_schema)
             temp_schema["type"] = type_option
             type_hint, _ = _process_schema_property(
-                _model_cache, temp_schema, model_name_prefix, prop_name, False, schema_defs=schema_defs
+                _model_cache,
+                temp_schema,
+                model_name_prefix,
+                prop_name,
+                False,
+                schema_defs=schema_defs,
             )
             type_hints.append(type_hint)
 
@@ -285,22 +292,29 @@ def get_tool_handler(
         def make_endpoint_func(
             endpoint_name: str, FormModel, session: ClientSession
         ):  # Parameterized endpoint
-            async def tool(form_data: FormModel, request: Request) -> Union[ResponseModel, Any]:
+            async def tool(
+                form_data: FormModel, request: Request
+            ) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
-                
+
                 # Process headers for forwarding if configured
                 forwarded_headers = {}
-                if client_header_forwarding_config and client_header_forwarding_config.get("enabled", False):
-                    forwarded_headers = process_headers_for_server(request, client_header_forwarding_config)
-                
+                if (
+                    client_header_forwarding_config
+                    and client_header_forwarding_config.get("enabled", False)
+                ):
+                    forwarded_headers = process_headers_for_server(
+                        request, client_header_forwarding_config
+                    )
+
                 # Add headers to _meta if any headers are being forwarded
                 meta = {}
                 if forwarded_headers:
                     meta["headers"] = forwarded_headers
-                
+
                 logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
                 try:
-                    result = await session.call_tool(endpoint_name, arguments=args, _meta=meta if meta else None)
+                    result = await session.call_tool(endpoint_name, arguments=args)
 
                     if result.isError:
                         error_message = "Unknown tool execution error"
@@ -352,21 +366,28 @@ def get_tool_handler(
         def make_endpoint_func_no_args(
             endpoint_name: str, session: ClientSession
         ):  # Parameterless endpoint
-            async def tool(request: Request):  # No parameters but need request for headers
+            async def tool(
+                request: Request,
+            ):  # No parameters but need request for headers
                 # Process headers for forwarding if configured
                 forwarded_headers = {}
-                if client_header_forwarding_config and client_header_forwarding_config.get("enabled", False):
-                    forwarded_headers = process_headers_for_server(request, client_header_forwarding_config)
-                
+                if (
+                    client_header_forwarding_config
+                    and client_header_forwarding_config.get("enabled", False)
+                ):
+                    forwarded_headers = process_headers_for_server(
+                        request, client_header_forwarding_config
+                    )
+
                 # Add headers to _meta if any headers are being forwarded
                 meta = {}
                 if forwarded_headers:
                     meta["headers"] = forwarded_headers
-                
+
                 logger.info(f"Calling endpoint: {endpoint_name}, with no args")
                 try:
                     result = await session.call_tool(
-                        endpoint_name, arguments={}, _meta=meta if meta else None
+                        endpoint_name, arguments={}
                     )  # Empty dict
 
                     if result.isError:
