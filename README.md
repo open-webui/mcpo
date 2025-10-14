@@ -103,7 +103,8 @@ Example config.json:
     },
     "time": {
       "command": "uvx",
-      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"],
+      "disabledTools": ["convert_time"] // Disable specific tools if needed
     },
     "mcp_sse": {
       "type": "sse", // Explicitly define type

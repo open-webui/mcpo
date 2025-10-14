@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.18] - 2025-09-07
+
+### Added
+
+- 🔧 **Support for disabling specific tools**: Tools can be filtered out using the `disabledTools` configuration option in the server declaration.
+
 ## [0.0.17] - 2025-07-22
 
 ### Added

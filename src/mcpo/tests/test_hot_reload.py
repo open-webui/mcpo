@@ -42,6 +42,19 @@ def test_validate_server_config_missing_url():
         validate_server_config("test_server", config)
 
 
+def test_validate_server_config_disabled_tools_valid():
+    """Test validation of server configuration with a valid disabledTools."""
+    config = {"command": "echo", "args": ["hello"], "disabledTools": ["search-web"]}
+    validate_server_config("test_server", config)
+
+
+def test_validate_server_config_disabled_tools_invalid():
+    """Test validation fails for an invalid disabledTools."""
+    config = {"command": "echo", "args": ["hello"], "disabledTools": "not-a-list"}
+    with pytest.raises(ValueError, match="'disabledTools' must be a list"):
+        validate_server_config("test_server", config)
+
+
 def test_load_config_valid():
     """Test loading a valid config file."""
     config_data = {

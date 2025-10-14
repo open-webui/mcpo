@@ -71,6 +71,16 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
         # Fallback for old SSE config without explicit type
         pass
     else:
+        raise ValueError(f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers")
+    
+    # Validate disabledTools
+    disabled_tools = server_cfg.get("disabled_tools")
+    if disabled_tools is not None:
+        if not isinstance(disabled_tools, list):
+            raise ValueError(f"Server '{server_name}' 'disabledTools' must be a list")
+        for tool_name in disabled_tools:
+            if not isinstance(tool_name, str):
+                raise ValueError(f"Server '{server_name}' 'disabledTools' must contain only strings")
         raise ValueError(
             f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers"
         )
@@ -167,6 +177,10 @@ def create_sub_app(
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
 
+    # Store list of tools to be disabled, if present
+    sub_app.state.disabled_tools = server_cfg.get("disabled_tools", [])
+
+    
     # Store client header forwarding configuration
     sub_app.state.client_header_forwarding = server_cfg.get(
         "client_header_forwarding", {"enabled": False}
@@ -174,6 +188,7 @@ def create_sub_app(
 
     # Store OAuth configuration if present
     sub_app.state.oauth_config = server_cfg.get("oauth")
+
 
     return sub_app
 
@@ -346,6 +361,15 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
 
     tools_result = await session.list_tools()
     tools = tools_result.tools
+    
+    # Filter out disabled tools
+    disabled_tools = getattr(app.state, "disabled_tools", [])
+    if disabled_tools:
+        original_count = len(tools)
+        tools = [tool for tool in tools if tool.name not in disabled_tools]
+        filtered_count = original_count - len(tools)
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} tool(s) for server '{app.title}': {disabled_tools}")
 
     for tool in tools:
         endpoint_name = tool.name
