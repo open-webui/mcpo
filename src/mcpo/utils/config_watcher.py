@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 class ConfigChangeHandler(FileSystemEventHandler):
     """Handler for config file changes."""
 
-    def __init__(self, config_path: Path, reload_callback: Callable[[Dict[str, Any]], None], loop: asyncio.AbstractEventLoop):
-        self.config_path = config_path.resolve()  # Resolve to absolute path
+    def __init__(self, origin_config_path: Path, reload_callback: Callable[[Dict[str, Any]], None], loop: asyncio.AbstractEventLoop):
+        self.origin_config_path = origin_config_path
+        self.config_path = origin_config_path.resolve()  # Resolve to absolute path
+        self.is_symlink = origin_config_path.is_symlink()
         self.reload_callback = reload_callback
         self.loop = loop  # Store reference to the main event loop
         self._last_modification = 0
@@ -24,6 +26,12 @@ class ConfigChangeHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         """Handle file modification events."""
+        if self.is_symlink:
+            self.config_path = self.origin_config_path.resolve()  # Re-resolve to get the latest symlink target
+            logger.info(f"Symlink file modified: {self.config_path}")
+            self._trigger_reload()
+            return
+
         if event.is_directory:
             return
 
@@ -116,7 +124,8 @@ class ConfigWatcher:
     """Watches a config file for changes and triggers reloads."""
 
     def __init__(self, config_path: str, reload_callback: Callable[[Dict[str, Any]], None]):
-        self.config_path = Path(config_path).resolve()
+        self.origin_config_path = Path(config_path)
+        self.config_path = self.origin_config_path.resolve()
         self.reload_callback = reload_callback
         self.observer: Optional[Observer] = None
         self.handler: Optional[ConfigChangeHandler] = None
@@ -135,12 +144,12 @@ class ConfigWatcher:
             logger.error("No running event loop found, cannot start config watcher")
             return
 
-        self.handler = ConfigChangeHandler(self.config_path, self.reload_callback, self.loop)
+        self.handler = ConfigChangeHandler(self.origin_config_path, self.reload_callback, self.loop)
         self.observer = Observer()
 
         # Watch the directory containing the config file
-        watch_dir = self.config_path.parent
-        logger.debug(f"Watching directory: {watch_dir} for file: {self.config_path}")
+        watch_dir = self.origin_config_path.parent
+        logger.info(f"Watching directory: {watch_dir} for file: {self.config_path}")
         self.observer.schedule(self.handler, str(watch_dir), recursive=False)
 
         self.observer.start()

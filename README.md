@@ -74,6 +74,18 @@ That’s it. Your MCP tool is now available at http://localhost:8000 with a gene
 
 🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/openapi-servers/open-webui/).**
 
+
+### 🌐 Serving Under a Subpath (`--root-path`)
+
+If you need to serve mcpo behind a reverse proxy or under a subpath (e.g., `/api/mcpo`), use the `--root-path` argument:
+
+```bash
+mcpo --port 8000 --root-path "/api/mcpo" --api-key "top-secret" -- your_mcp_server_command
+```
+
+All routes will be served under the specified root path, e.g. `http://localhost:8000/api/mcpo/memory`.
+
+
 ### 🔄 Using a Config File
 
 You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
@@ -103,7 +115,8 @@ Example config.json:
     },
     "time": {
       "command": "uvx",
-      "args": ["mcp-server-time", "--local-timezone=America/New_York"]
+      "args": ["mcp-server-time", "--local-timezone=America/New_York"],
+      "disabledTools": ["convert_time"] // Disable specific tools if needed
     },
     "mcp_sse": {
       "type": "sse", // Explicitly define type
@@ -126,6 +139,64 @@ Each tool will be accessible under its own unique route, e.g.:
 - http://localhost:8000/time
 
 Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
+
+### 🔐 OAuth 2.1 Authentication
+
+mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
+
+```json
+{
+  "mcpServers": {
+    "oauth-protected-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:8000/mcp",
+      "oauth": {
+        "server_url": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+#### OAuth Configuration Options
+
+**Basic Options:**
+- `server_url` (required): OAuth server base URL
+- `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
+- `callback_port`: Local port for OAuth callback (default: 3030)
+- `use_loopback`: Auto-open browser for auth (default: true)
+
+**Advanced Options (rarely needed):**
+For servers that don't support dynamic client registration, you can specify static client metadata:
+
+```json
+{
+  "mcpServers": {
+    "legacy-oauth-server": {
+      "type": "streamable-http", 
+      "url": "http://api.example.com/mcp",
+      "oauth": {
+        "server_url": "http://api.example.com",
+        "client_metadata": {
+          "client_name": "My MCPO Client",
+          "redirect_uris": ["http://localhost:3030/callback"]
+        }
+      }
+    }
+  }
+}
+```
+
+> **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
+
+On first connection, mcpo will:
+1. Perform dynamic client registration (if supported)
+2. Open your browser for authorization
+3. Capture the OAuth callback automatically  
+4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
+5. Use tokens for all subsequent requests
+
+OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
 
 ## 🔧 Requirements
 
