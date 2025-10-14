@@ -178,17 +178,21 @@ def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
 
 def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
     """Unmount specific MCP servers."""
+    active_lifespans = getattr(main_app.state, 'active_lifespans', {})
+    
     for server_name in server_names:
         mount_path = f"{path_prefix}{server_name}"
-        # Find and remove the mount
-        routes_to_remove = []
-        for route in main_app.router.routes:
-            if hasattr(route, 'path') and route.path == mount_path:
-                routes_to_remove.append(route)
-
-        for route in routes_to_remove:
-            main_app.router.routes.remove(route)
-            logger.info(f"Unmounted server: {server_name}")
+        
+        # Clean up lifespan context if it exists
+        if server_name in active_lifespans:
+            lifespan_context = active_lifespans[server_name]
+            try:
+                # Schedule cleanup of the lifespan context
+                asyncio.create_task(lifespan_context.__aexit__(None, None, None))
+            except Exception as e:
+                logger.warning(f"Error cleaning up lifespan for {server_name}: {e}")
+            finally:
+                del active_lifespans[server_name]
 
 
 async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, Any]):
@@ -236,6 +240,11 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         # Add new servers and updated servers
         if servers_to_add:
             logger.info(f"Adding servers: {list(servers_to_add)}")
+
+            # Store lifespan contexts for cleanup
+            if not hasattr(main_app.state, 'active_lifespans'):
+                main_app.state.active_lifespans = {}
+            
             for server_name in servers_to_add:
                 server_cfg = new_config_data["mcpServers"][server_name]
                 try:
@@ -244,6 +253,21 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
                         strict_auth, api_dependency, connection_timeout, lifespan
                     )
                     main_app.mount(f"{path_prefix}{server_name}", sub_app)
+                                        
+                    # Start the lifespan for the new sub-app
+                    lifespan_context = sub_app.router.lifespan_context(sub_app)
+                    await lifespan_context.__aenter__()
+                    
+                    # Store the context manager for cleanup later
+                    main_app.state.active_lifespans[server_name] = lifespan_context
+                    
+                    # Check if connection was successful
+                    is_connected = getattr(sub_app.state, "is_connected", False)
+                    if is_connected:
+                        logger.info(f"Successfully connected to new server: '{server_name}'")
+                    else:
+                        logger.warning(f"Failed to connect to new server: '{server_name}'")
+                        
                 except Exception as e:
                     logger.error(f"Failed to create server '{server_name}': {e}")
                     # Rollback on failure
