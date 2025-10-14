@@ -9,4 +9,5 @@ wheels/
 # Virtual environments
 .venv
 config.json
+.python-version
 .vscode
