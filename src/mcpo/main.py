@@ -31,6 +31,8 @@ from mcpo.utils.oauth import create_oauth_provider
 
 logger = logging.getLogger(__name__)
 
+CONNECTION_TIMEOUT = os.getenv("CONNECTION_TIMEOUT", None)
+
 
 class GracefulShutdown:
     def __init__(self):
@@ -56,7 +58,9 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
 
     if normalize_server_type(server_type) in ("sse", "streamable-http"):
         if not server_cfg.get("url"):
-            raise ValueError(f"Server '{server_name}' of type '{server_type}' requires a 'url' field")
+            raise ValueError(
+                f"Server '{server_name}' of type '{server_type}' requires a 'url' field"
+            )
     elif server_cfg.get("command"):
         # stdio server
         if not isinstance(server_cfg["command"], str):
@@ -67,7 +71,9 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
         # Fallback for old SSE config without explicit type
         pass
     else:
-        raise ValueError(f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers")
+        raise ValueError(
+            f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers"
+        )
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -84,7 +90,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
         # Validate each server configuration
         for server_name, server_cfg in mcp_servers.items():
             validate_server_config(server_name, server_cfg)
-            
+
             # Validate client header forwarding configuration if present
             header_config = server_cfg.get("client_header_forwarding", {})
             if header_config:
@@ -102,9 +108,16 @@ def load_config(config_path: str) -> Dict[str, Any]:
         raise
 
 
-def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_origins,
-                   api_key: Optional[str], strict_auth: bool, api_dependency,
-                   connection_timeout, lifespan) -> FastAPI:
+def create_sub_app(
+    server_name: str,
+    server_cfg: Dict[str, Any],
+    cors_allow_origins,
+    api_key: Optional[str],
+    strict_auth: bool,
+    api_dependency,
+    connection_timeout,
+    lifespan,
+) -> FastAPI:
     """Create a sub-application for an MCP server."""
     sub_app = FastAPI(
         title=f"{server_name}",
@@ -134,7 +147,9 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
         sub_app.state.server_type = "sse"
         sub_app.state.args = [server_cfg["url"]]
         sub_app.state.headers = server_cfg.get("headers")
-    elif normalize_server_type(server_config_type) == "streamable-http" and server_cfg.get("url"):
+    elif normalize_server_type(
+        server_config_type
+    ) == "streamable-http" and server_cfg.get("url"):
         url = server_cfg["url"]
         sub_app.state.server_type = "streamablehttp"
         sub_app.state.args = [url]
@@ -151,9 +166,11 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
 
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
-    
+
     # Store client header forwarding configuration
-    sub_app.state.client_header_forwarding = server_cfg.get("client_header_forwarding", {"enabled": False})
+    sub_app.state.client_header_forwarding = server_cfg.get(
+        "client_header_forwarding", {"enabled": False}
+    )
 
     # Store OAuth configuration if present
     sub_app.state.oauth_config = server_cfg.get("oauth")
@@ -161,28 +178,42 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
     return sub_app
 
 
-def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
-                        cors_allow_origins, api_key: Optional[str], strict_auth: bool,
-                        api_dependency, connection_timeout, lifespan, path_prefix: str):
+def mount_config_servers(
+    main_app: FastAPI,
+    config_data: Dict[str, Any],
+    cors_allow_origins,
+    api_key: Optional[str],
+    strict_auth: bool,
+    api_dependency,
+    connection_timeout,
+    lifespan,
+    path_prefix: str,
+):
     """Mount MCP servers from config data."""
     mcp_servers = config_data.get("mcpServers", {})
 
     logger.info("Configuring MCP Servers:")
     for server_name, server_cfg in mcp_servers.items():
         sub_app = create_sub_app(
-            server_name, server_cfg, cors_allow_origins, api_key,
-            strict_auth, api_dependency, connection_timeout, lifespan
+            server_name,
+            server_cfg,
+            cors_allow_origins,
+            api_key,
+            strict_auth,
+            api_dependency,
+            connection_timeout,
+            lifespan,
         )
         main_app.mount(f"{path_prefix}{server_name}", sub_app)
 
 
 def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
     """Unmount specific MCP servers."""
-    active_lifespans = getattr(main_app.state, 'active_lifespans', {})
-    
+    active_lifespans = getattr(main_app.state, "active_lifespans", {})
+
     for server_name in server_names:
         mount_path = f"{path_prefix}{server_name}"
-        
+
         # Clean up lifespan context if it exists
         if server_name in active_lifespans:
             lifespan_context = active_lifespans[server_name]
@@ -197,7 +228,7 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
 
 async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, Any]):
     """Handle config reload by comparing and updating mounted servers."""
-    old_config_data = getattr(main_app.state, 'config_data', {})
+    old_config_data = getattr(main_app.state, "config_data", {})
     backup_routes = list(main_app.router.routes)  # Backup current routes for rollback
 
     try:
@@ -210,13 +241,13 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         servers_to_check = old_servers & new_servers
 
         # Get app configuration from state
-        cors_allow_origins = getattr(main_app.state, 'cors_allow_origins', ["*"])
-        api_key = getattr(main_app.state, 'api_key', None)
-        strict_auth = getattr(main_app.state, 'strict_auth', False)
-        api_dependency = getattr(main_app.state, 'api_dependency', None)
-        connection_timeout = getattr(main_app.state, 'connection_timeout', None)
-        lifespan = getattr(main_app.state, 'lifespan', None)
-        path_prefix = getattr(main_app.state, 'path_prefix', "/")
+        cors_allow_origins = getattr(main_app.state, "cors_allow_origins", ["*"])
+        api_key = getattr(main_app.state, "api_key", None)
+        strict_auth = getattr(main_app.state, "strict_auth", False)
+        api_dependency = getattr(main_app.state, "api_dependency", None)
+        connection_timeout = getattr(main_app.state, "connection_timeout", None)
+        lifespan = getattr(main_app.state, "lifespan", None)
+        path_prefix = getattr(main_app.state, "path_prefix", "/")
 
         # Remove servers that are no longer in config
         if servers_to_remove:
@@ -242,32 +273,42 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
             logger.info(f"Adding servers: {list(servers_to_add)}")
 
             # Store lifespan contexts for cleanup
-            if not hasattr(main_app.state, 'active_lifespans'):
+            if not hasattr(main_app.state, "active_lifespans"):
                 main_app.state.active_lifespans = {}
-            
+
             for server_name in servers_to_add:
                 server_cfg = new_config_data["mcpServers"][server_name]
                 try:
                     sub_app = create_sub_app(
-                        server_name, server_cfg, cors_allow_origins, api_key,
-                        strict_auth, api_dependency, connection_timeout, lifespan
+                        server_name,
+                        server_cfg,
+                        cors_allow_origins,
+                        api_key,
+                        strict_auth,
+                        api_dependency,
+                        connection_timeout,
+                        lifespan,
                     )
                     main_app.mount(f"{path_prefix}{server_name}", sub_app)
-                                        
+
                     # Start the lifespan for the new sub-app
                     lifespan_context = sub_app.router.lifespan_context(sub_app)
                     await lifespan_context.__aenter__()
-                    
+
                     # Store the context manager for cleanup later
                     main_app.state.active_lifespans[server_name] = lifespan_context
-                    
+
                     # Check if connection was successful
                     is_connected = getattr(sub_app.state, "is_connected", False)
                     if is_connected:
-                        logger.info(f"Successfully connected to new server: '{server_name}'")
+                        logger.info(
+                            f"Successfully connected to new server: '{server_name}'"
+                        )
                     else:
-                        logger.warning(f"Failed to connect to new server: '{server_name}'")
-                        
+                        logger.warning(
+                            f"Failed to connect to new server: '{server_name}'"
+                        )
+
                 except Exception as e:
                     logger.error(f"Failed to create server '{server_name}': {e}")
                     # Rollback on failure
@@ -330,8 +371,10 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             )
 
         # Get client header forwarding configuration from app state
-        client_header_forwarding_config = getattr(app.state, "client_header_forwarding", {"enabled": False})
-        
+        client_header_forwarding_config = getattr(
+            app.state, "client_header_forwarding", {"enabled": False}
+        )
+
         tool_handler = get_tool_handler(
             session,
             endpoint_name,
@@ -356,14 +399,16 @@ async def lifespan(app: FastAPI):
     args = getattr(app.state, "args", [])
     args = args if isinstance(args, list) else [args]
     env = getattr(app.state, "env", {})
-    connection_timeout = getattr(app.state, "connection_timeout", 10)
+    connection_timeout = getattr(app.state, "connection_timeout", CONNECTION_TIMEOUT)
     api_dependency = getattr(app.state, "api_dependency", None)
     path_prefix = getattr(app.state, "path_prefix", "/")
 
     # Get shutdown handler from app state
     shutdown_handler = getattr(app.state, "shutdown_handler", None)
 
-    is_main_app = not command and not (server_type in ["sse", "streamable-http"] and args)
+    is_main_app = not command and not (
+        server_type in ["sse", "streamable-http"] and args
+    )
 
     if is_main_app:
         async with AsyncExitStack() as stack:
@@ -392,24 +437,31 @@ async def lifespan(app: FastAPI):
                         failed_servers.append(server_name)
                 except Exception as e:
                     error_class_name = type(e).__name__
-                    if error_class_name == 'ExceptionGroup' or (hasattr(e, 'exceptions') and hasattr(e, 'message')):
+                    if error_class_name == "ExceptionGroup" or (
+                        hasattr(e, "exceptions") and hasattr(e, "message")
+                    ):
                         logger.error(
                             f"Failed to establish connection for server: '{server_name}' - Multiple errors occurred:"
                         )
                         # Log each individual exception from the group
-                        exceptions = getattr(e, 'exceptions', [])
+                        exceptions = getattr(e, "exceptions", [])
                         for idx, exc in enumerate(exceptions):
-                            logger.error(f"  Error {idx + 1}: {type(exc).__name__}: {exc}")
+                            logger.error(
+                                f"  Error {idx + 1}: {type(exc).__name__}: {exc}"
+                            )
                             # Also log traceback for each exception
-                            if hasattr(exc, '__traceback__'):
+                            if hasattr(exc, "__traceback__"):
                                 import traceback
-                                tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+
+                                tb_lines = traceback.format_exception(
+                                    type(exc), exc, exc.__traceback__
+                                )
                                 for line in tb_lines:
                                     logger.debug(f"    {line.rstrip()}")
                     else:
                         logger.error(
                             f"Failed to establish connection for server: '{server_name}' - {type(e).__name__}: {e}",
-                            exc_info=True
+                            exc_info=True,
                         )
                     failed_servers.append(server_name)
 
@@ -441,7 +493,7 @@ async def lifespan(app: FastAPI):
             # Check for OAuth configuration
             oauth_config = getattr(app.state, "oauth_config", None)
             auth_provider = None
-            
+
             if oauth_config:
                 server_name = app.title
                 logger.info(f"OAuth configuration detected for server: {server_name}")
@@ -449,13 +501,15 @@ async def lifespan(app: FastAPI):
                     auth_provider = await create_oauth_provider(
                         server_name=server_name,
                         oauth_config=oauth_config,
-                        storage_type=oauth_config.get("storage_type", "file")
+                        storage_type=oauth_config.get("storage_type", "file"),
                     )
                     logger.info(f"OAuth provider created for server: {server_name}")
                 except Exception as e:
-                    logger.error(f"Failed to create OAuth provider for {server_name}: {e}")
+                    logger.error(
+                        f"Failed to create OAuth provider for {server_name}: {e}"
+                    )
                     raise
-            
+
             if server_type == "stdio":
                 # stdio doesn't support OAuth authentication
                 if oauth_config:
@@ -479,7 +533,7 @@ async def lifespan(app: FastAPI):
             elif server_type == "streamable-http":
                 headers = getattr(app.state, "headers", None)
                 client_context = streamablehttp_client(
-                    url=args[0], 
+                    url=args[0],
                     headers=headers,
                     auth=auth_provider,  # Pass OAuth provider if configured
                 )
@@ -494,7 +548,10 @@ async def lifespan(app: FastAPI):
                     yield
         except Exception as e:
             # Log the full exception with traceback for debugging
-            logger.error(f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to connect to MCP server '{app.title}': {type(e).__name__}: {e}",
+                exc_info=True,
+            )
             app.state.is_connected = False
             # Re-raise the exception so it propagates to the main app's lifespan
             raise
@@ -634,8 +691,15 @@ async def run(
         logger.info(f"Loading MCP server configurations from: {config_path}")
         config_data = load_config(config_path)
         mount_config_servers(
-            main_app, config_data, cors_allow_origins, api_key, strict_auth,
-            api_dependency, connection_timeout, lifespan, path_prefix
+            main_app,
+            config_data,
+            cors_allow_origins,
+            api_key,
+            strict_auth,
+            api_dependency,
+            connection_timeout,
+            lifespan,
+            path_prefix,
         )
 
         # Store config info and app state for hot reload
