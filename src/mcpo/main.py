@@ -611,6 +611,7 @@ async def run(
     ssl_certfile = kwargs.get("ssl_certfile")
     ssl_keyfile = kwargs.get("ssl_keyfile")
     path_prefix = kwargs.get("path_prefix") or "/"
+    root_path = kwargs.get("root_path") or ""
 
     # Configure logging based on LOG_LEVEL environment variable
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -649,6 +650,7 @@ async def run(
     if ssl_keyfile:
         logger.info(f"  SSL Key File: {ssl_keyfile}")
     logger.info(f"  Path Prefix: {path_prefix}")
+    logger.info(f"  Root Path: {root_path}")
 
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()
@@ -657,6 +659,7 @@ async def run(
         title=name,
         description=description,
         version=version,
+        root_path=root_path,
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
         lifespan=lifespan,
