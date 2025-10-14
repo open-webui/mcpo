@@ -2,7 +2,7 @@ import json
 import traceback
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
 import logging
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from mcp import ClientSession, types
 from mcp.types import (
@@ -18,6 +18,8 @@ from mcp.shared.exceptions import McpError
 
 from pydantic import Field, create_model
 from pydantic.fields import FieldInfo
+
+from mcpo.utils.headers import process_headers_for_server
 
 MCP_ERROR_TO_HTTP_STATUS = {
     PARSE_ERROR: 400,
@@ -270,6 +272,7 @@ def get_tool_handler(
     endpoint_name,
     form_model_fields,
     response_model_fields=None,
+    client_header_forwarding_config=None,
 ):
     if form_model_fields:
         FormModel = create_model(f"{endpoint_name}_form_model", **form_model_fields)
@@ -282,11 +285,22 @@ def get_tool_handler(
         def make_endpoint_func(
             endpoint_name: str, FormModel, session: ClientSession
         ):  # Parameterized endpoint
-            async def tool(form_data: FormModel) -> Union[ResponseModel, Any]:
+            async def tool(form_data: FormModel, request: Request) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
+                
+                # Process headers for forwarding if configured
+                forwarded_headers = {}
+                if client_header_forwarding_config and client_header_forwarding_config.get("enabled", False):
+                    forwarded_headers = process_headers_for_server(request, client_header_forwarding_config)
+                
+                # Add headers to _meta if any headers are being forwarded
+                meta = {}
+                if forwarded_headers:
+                    meta["headers"] = forwarded_headers
+                
                 logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
                 try:
-                    result = await session.call_tool(endpoint_name, arguments=args)
+                    result = await session.call_tool(endpoint_name, arguments=args, _meta=meta if meta else None)
 
                     if result.isError:
                         error_message = "Unknown tool execution error"
@@ -338,11 +352,21 @@ def get_tool_handler(
         def make_endpoint_func_no_args(
             endpoint_name: str, session: ClientSession
         ):  # Parameterless endpoint
-            async def tool():  # No parameters
+            async def tool(request: Request):  # No parameters but need request for headers
+                # Process headers for forwarding if configured
+                forwarded_headers = {}
+                if client_header_forwarding_config and client_header_forwarding_config.get("enabled", False):
+                    forwarded_headers = process_headers_for_server(request, client_header_forwarding_config)
+                
+                # Add headers to _meta if any headers are being forwarded
+                meta = {}
+                if forwarded_headers:
+                    meta["headers"] = forwarded_headers
+                
                 logger.info(f"Calling endpoint: {endpoint_name}, with no args")
                 try:
                     result = await session.call_tool(
-                        endpoint_name, arguments={}
+                        endpoint_name, arguments={}, _meta=meta if meta else None
                     )  # Empty dict
 
                     if result.isError:

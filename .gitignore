@@ -10,3 +10,4 @@ wheels/
 .venv
 config.json
 .python-version
+.vscode
