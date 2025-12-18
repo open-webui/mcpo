@@ -280,8 +280,8 @@ def mask_sensitive_headers(args: dict) -> dict:
     """Masks sensitive header values in logs."""
     masked = copy.deepcopy(args)
 
-    if "mcpo_headers" in masked and isinstance(masked["mcpo_headers"], dict):
-        headers = masked["mcpo_headers"]
+    if "headers" in masked and isinstance(masked["headers"], dict):
+        headers = masked["headers"]
         sensitive_keys = {
             "authorization",
             "token",
@@ -376,7 +376,7 @@ def get_tool_handler(
                 )
 
             if forwarded_headers:
-                args["mcpo_headers"] = forwarded_headers
+                args["headers"] = forwarded_headers
             masked_args = mask_sensitive_headers(args)                
             logger.info(f"Calling endpoint: {endpoint_name}, with args: {masked_args}")
             try:
@@ -437,7 +437,7 @@ def get_tool_handler(
 
         arguments = {}
         if forwarded_headers:
-            arguments["mcpo_headers"] = forwarded_headers
+            arguments["headers"] = forwarded_headers
 
         logger.info(f"Calling endpoint: {endpoint_name}, with no args")
         try:
