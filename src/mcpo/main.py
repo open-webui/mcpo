@@ -73,17 +73,14 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
     else:
         raise ValueError(f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers")
     
-    # Validate disabledTools
+    # Validate disabled_tools
     disabled_tools = server_cfg.get("disabled_tools")
     if disabled_tools is not None:
         if not isinstance(disabled_tools, list):
-            raise ValueError(f"Server '{server_name}' 'disabledTools' must be a list")
+            raise ValueError(f"Server '{server_name}' 'disabled_tools' must be a list")
         for tool_name in disabled_tools:
             if not isinstance(tool_name, str):
-                raise ValueError(f"Server '{server_name}' 'disabledTools' must contain only strings")
-        raise ValueError(
-            f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers"
-        )
+                raise ValueError(f"Server '{server_name}' 'disabled_tools' must contain only strings")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
