@@ -321,7 +321,81 @@ def test_ref_to_parent_node():
         "item",
         False,
         {},
+        root_properties=None,
     )
 
     assert result_type == Any
     assert result_field.description == ""
+
+
+def test_ref_to_sibling_property():
+    """Test $ref to sibling property in the same schema (Issue #117)."""
+    root_properties = {
+        "event_time_start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start time in ISO 8601 format",
+        },
+        "event_time_end": {
+            "$ref": "#/properties/event_time_start",
+            "description": "End time in ISO 8601 format",
+        },
+    }
+    schema = root_properties["event_time_end"]
+    result_type, result_field = _process_schema_property(
+        _model_cache,
+        schema,
+        "test_form_model",
+        "event_time_end",
+        False,
+        schema_defs={},
+        root_properties=root_properties,
+    )
+
+    assert result_type is str
+    # The merged description should be the one from the referencing schema
+    assert result_field.description == "End time in ISO 8601 format"
+
+
+def test_ref_to_defs():
+    """Test $ref to $defs works correctly."""
+    schema = {"$ref": "#/$defs/DateTimeField"}
+    schema_defs = {
+        "DateTimeField": {
+            "type": "string",
+            "format": "date-time",
+            "description": "A date-time field",
+        }
+    }
+    result_type, result_field = _process_schema_property(
+        _model_cache,
+        schema,
+        "test_form_model",
+        "created_at",
+        True,
+        schema_defs=schema_defs,
+        root_properties={},
+    )
+
+    assert result_type is str
+    assert result_field.description == "A date-time field"
+
+
+def test_ref_with_missing_target():
+    """Test $ref gracefully handles missing target."""
+    schema = {
+        "$ref": "#/properties/nonexistent",
+        "description": "Fallback description",
+    }
+    result_type, result_field = _process_schema_property(
+        _model_cache,
+        schema,
+        "test_form_model",
+        "field",
+        False,
+        schema_defs={},
+        root_properties={"other_field": {"type": "string"}},
+    )
+
+    assert result_type == Any
+    assert result_field.description == "Fallback description"
