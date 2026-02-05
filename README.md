@@ -72,7 +72,7 @@ uvx mcpo --port 8000 --api-key "top-secret" -- uvx mcp-server-time --local-timez
 
 That’s it. Your MCP tool is now available at http://localhost:8000 with a generated OpenAPI schema — test it live at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/openapi-servers/open-webui/).**
+🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/features/plugin/tools/openapi-servers/mcp).**
 
 
 ### 🌐 Serving Under a Subpath (`--root-path`)
