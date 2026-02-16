@@ -14,7 +14,7 @@ import httpx
 logger = logging.getLogger("gemini_client")
 
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-GEMINI_API_VERSION = "v1beta"
+GEMINI_DEFAULT_API_VERSION = "v1beta"
 
 # Environment-configurable defaults
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
@@ -132,10 +132,11 @@ class GeminiClient:
             raise GeminiError("GEMINI_API_KEY or GOOGLE_API_KEY environment variable is required")
             
         self._base_url = (base_url or os.getenv("GEMINI_BASE_URL") or GEMINI_DEFAULT_BASE_URL).rstrip("/")
-        self._timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
-        self._max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
-        self._enable_caching = enable_context_caching if enable_context_caching is not None else DEFAULT_ENABLE_CONTEXT_CACHING
-        self._stream_timeout = stream_timeout if stream_timeout is not None else DEFAULT_STREAM_TIMEOUT_SECONDS
+        self._timeout = timeout if timeout is not None else float(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
+        self._max_retries = max_retries if max_retries is not None else int(os.getenv("GEMINI_MAX_RETRIES", "2"))
+        self._enable_caching = enable_context_caching if enable_context_caching is not None else os.getenv("GEMINI_ENABLE_CONTEXT_CACHING", "true").lower() in ("true", "1", "yes")
+        self._stream_timeout = stream_timeout if stream_timeout is not None else float(os.getenv("GEMINI_STREAM_TIMEOUT_SECONDS", "300"))
+        self._api_version = os.getenv("GEMINI_API_VERSION", GEMINI_DEFAULT_API_VERSION)
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -499,7 +500,7 @@ class GeminiClient:
             thinking_budget, include_thoughts, top_p, **kwargs
         )
         
-        url = f"{self._base_url}/{GEMINI_API_VERSION}/models/{model}:generateContent"
+        url = f"{self._base_url}/{self._api_version}/models/{model}:generateContent"
         headers = self._get_headers()
         
         for attempt in range(self._max_retries + 1):
@@ -558,7 +559,7 @@ class GeminiClient:
             thinking_budget, include_thoughts, top_p, **kwargs
         )
         
-        url = f"{self._base_url}/{GEMINI_API_VERSION}/models/{model}:streamGenerateContent?alt=sse"
+        url = f"{self._base_url}/{self._api_version}/models/{model}:streamGenerateContent?alt=sse"
         headers = self._get_headers()
 
         async def _stream_generator() -> AsyncIterator[str]:

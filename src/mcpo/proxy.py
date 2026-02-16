@@ -254,19 +254,24 @@ async def run_proxy(
     api_app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     api_app.state.bound_host = host
     api_app.state.bound_port = port
 
+    # Determine OpenAPI admin UI host:port from env or default
+    _openapi_host = os.environ.get("MCPO_OPENAPI_HOST", "127.0.0.1")
+    _openapi_port = os.environ.get("MCPO_OPENAPI_PORT", "8000")
+    _openapi_base = f"http://{_openapi_host}:{_openapi_port}"
+
     # Friendly redirects so opening the proxy port in a browser isn't blank
     @api_app.get("/", response_class=HTMLResponse)
     async def _proxy_root_landing():
         try:
             # Redirect to the Admin UI if it's running on the common default port
-            target = f"http://127.0.0.1:8000/ui/"
+            target = f"{_openapi_base}/ui/"
             return RedirectResponse(url=target, status_code=307)
         except Exception:
             # As a last resort, show a tiny hint page
@@ -275,7 +280,7 @@ async def run_proxy(
                     "<html><body style='font-family:system-ui, sans-serif; padding:16px;'>"
                     "<h3>MCP Proxy</h3>"
                     "<p>This port serves the MCP Streamable HTTP proxy. The UI is available at "
-                    "<a href='http://127.0.0.1:8000/ui/'>http://127.0.0.1:8000/ui/</a>." \
+                    f"<a href='{_openapi_base}/ui/'>{_openapi_base}/ui/</a>."
                     "</p>"
                     "</body></html>"
                 ),
@@ -285,7 +290,7 @@ async def run_proxy(
 
     @api_app.get("/ui")
     async def _proxy_ui_redirect():
-        return RedirectResponse(url="http://127.0.0.1:8000/ui/", status_code=307)
+        return RedirectResponse(url=f"{_openapi_base}/ui/", status_code=307)
 
     proxy_mounts: list[dict[str, Any]] = []
 

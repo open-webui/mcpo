@@ -197,10 +197,18 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
 # Global variable already initialized above
 
 @router.post("/env")
-def update_env_vars(data: Dict[str, str]):
+def update_env_vars(data: Dict[str, str], request: Request):
     """Update environment variables in local .env file. Minimal implementation.
     This endpoint is intended for local/dev use; secure or disable in production.
     """
+    import re as _re
+    # Block in read-only mode
+    if getattr(request.app.state, 'read_only_mode', False):
+        raise HTTPException(status_code=403, detail="Read-only mode")
+    
+    # Deny dangerous keys
+    DENIED_KEYS = {"PATH", "HOME", "USER", "SHELL", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH"}
+    
     try:
         env_path = ".env"
         existing: Dict[str, str] = {}
@@ -216,6 +224,11 @@ def update_env_vars(data: Dict[str, str]):
         for k, v in data.items():
             if not isinstance(k, str):
                 continue
+            # Validate key format
+            if not _re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', k):
+                raise HTTPException(status_code=422, detail=f"Invalid env var key: {k}")
+            if k.upper() in DENIED_KEYS:
+                raise HTTPException(status_code=403, detail=f"Cannot modify protected key: {k}")
             existing[k] = str(v)
             # also update process env for this process
             os.environ[k] = str(v)
@@ -224,5 +237,7 @@ def update_env_vars(data: Dict[str, str]):
             for k, v in existing.items():
                 f.write(f"{k}={v}\n")
         return {"status": "updated", "count": len(data)}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

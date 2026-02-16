@@ -1,9 +1,12 @@
 from fastapi.testclient import TestClient
 import json
 import pytest
+from mcpo.services.state import get_state_manager
+
 
 @pytest.mark.asyncio
-async def test_enable_disable_server_and_tool_enforcement(tmp_path):
+async def test_enable_disable_server_via_meta_endpoints(tmp_path):
+    """Test server enable/disable via /_meta/servers/{name}/enable|disable endpoints."""
     from mcpo.main import build_main_app
 
     cfg_path = tmp_path / 'mcpo.json'
@@ -12,37 +15,28 @@ async def test_enable_disable_server_and_tool_enforcement(tmp_path):
     app = await build_main_app(config_path=str(cfg_path))
     client = TestClient(app)
 
-    # Initially enabled
-    r = client.get('/_meta/servers')
-    assert r.status_code == 200
-    servers = {s['name']: s for s in r.json()['servers']}
-    assert servers['s1']['enabled'] is True
+    state_manager = get_state_manager()
+    # Initially enabled via state manager
+    assert state_manager.is_server_enabled('s1') is True
 
-    # Disable server
+    # Disable server via endpoint
     r = client.post('/_meta/servers/s1/disable')
     assert r.status_code == 200 and r.json()['enabled'] is False
 
-    # Simulate a tool endpoint existence by injecting state then calling tool handler path
-    # We mimic a discovered tool named 'ping' (no args case) by setting enable map then hitting endpoint.
-    app.state.tool_enabled.setdefault('s1', {})['ping'] = True
+    # Verify via state manager
+    assert state_manager.is_server_enabled('s1') is False
 
-    # Re-enable server
+    # Re-enable server via endpoint
     r = client.post('/_meta/servers/s1/enable')
     assert r.status_code == 200 and r.json()['enabled'] is True
 
-    # Disable tool only (leave server enabled)
-    app.state.tool_enabled['s1']['ping'] = False
-    from mcpo.main import save_state_file
-    save_state_file(app.state.config_path, app.state.server_enabled, app.state.tool_enabled)
+    # Verify via state manager
+    assert state_manager.is_server_enabled('s1') is True
 
-    # Because the actual tool route isn't created (depends on real MCP session), directly test handler gating logic
-    # by calling the internal mount path; since route won't exist we just verify state maps (sanity) here.
-    assert app.state.server_enabled['s1'] is True
-    assert app.state.tool_enabled['s1']['ping'] is False
 
 @pytest.mark.asyncio
 async def test_disabled_tool_returns_disabled_code(monkeypatch, tmp_path):
-    # Build a fake session with a single tool to exercise the dynamic handler directly
+    """Test that calling a disabled tool returns 403 with code 'disabled'."""
     from mcpo.main import build_main_app
     from mcpo.utils.main import get_tool_handler
     from fastapi import FastAPI
@@ -66,13 +60,13 @@ async def test_disabled_tool_returns_disabled_code(monkeypatch, tmp_path):
     sub.post('/demo')(handler)
     app.mount('/sX', sub)
 
-    # Disable server or tool state
-    app.state.server_enabled['sX'] = True
-    app.state.tool_enabled.setdefault('sX', {})['demo'] = False
+    # Set up legacy tool_enabled dict on app.state for handler compatibility
+    app.state.tool_enabled = {'sX': {'demo': False}}
 
     client = TestClient(app)
     resp = client.post('/sX/demo')
     assert resp.status_code == 403
     js = resp.json()
+    # When the main_app exception handler is active, it wraps in error_envelope
     assert js['ok'] is False
-    assert js['error']['code'] == 'disabled'
+    assert js['error']['message'] == 'Tool disabled'

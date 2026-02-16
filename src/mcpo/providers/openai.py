@@ -102,11 +102,11 @@ class OpenAIClient:
         reasoning_effort: Optional[str] = None,
         use_responses_api: Optional[bool] = None
     ) -> None:
-        # Only OPEN_AI_API_KEY supported (no fallback - avoids Windows env var conflicts)
-        self._api_key = api_key or os.getenv("OPEN_AI_API_KEY")
+        # Support both OPEN_AI_API_KEY and OPENAI_API_KEY env vars
+        self._api_key = api_key or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_API_KEY")
         if not self._api_key:
             raise OpenAIError(
-                "OPEN_AI_API_KEY environment variable is required"
+                "OPEN_AI_API_KEY or OPENAI_API_KEY environment variable is required"
             )
         
         # Base URL    
@@ -433,23 +433,27 @@ class OpenAIClient:
         **kwargs: Any
     ) -> Dict[str, Any]:
         """Prepare body for Responses API."""
-        # Extract the last user message as "input"
-        last_message = messages[-1] if messages else {"content": ""}
-        input_content = last_message.get("content", "")
-        
-        # Instructions = system/developer message
+        # Build input as a list of message objects for multi-turn context
+        input_messages = []
         instructions = None
         for msg in messages:
-            if msg.get("role") in ["system", "developer"]:
-                instructions = msg.get("content")
-                break
+            role = msg.get("role", "")
+            if role in ["system", "developer"]:
+                # Extract instructions from system/developer messages
+                if instructions is None:
+                    instructions = msg.get("content", "")
+                continue
+            input_messages.append({"role": role, "content": msg.get("content", "")})
+        
+        # Fallback: if no non-system messages, use empty string
+        input_content = input_messages if input_messages else ""
 
         body: Dict[str, Any] = {
             "model": model,
             "input": input_content,
             "max_output_tokens": max_tokens
         }
-        
+
         if instructions:
             body["instructions"] = instructions
 

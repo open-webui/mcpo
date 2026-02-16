@@ -97,8 +97,9 @@ class MCPToolFilterMiddleware:
                         filtered_data = self._filter_mcp_message(data)
                         filtered_body = json.dumps(filtered_data).encode()
                         
-                        # Send the start message we held
-                        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json")]})
+                        # Send the start message we held, preserving original headers
+                        held_headers = start_message_held.get("headers", [(b"content-type", b"application/json")])
+                        await send({"type": "http.response.start", "status": 200, "headers": held_headers})
                         
                         # Send filtered body
                         await send({"type": "http.response.body", "body": filtered_body})
@@ -199,8 +200,8 @@ class MCPToolFilterMiddleware:
     
     def _find_server_for_tool(self, tool_name: str) -> str:
         """Find which server a tool belongs to by checking state."""
-        state = self.state_manager.get_state()
-        for server_name, server_data in state.get("servers", {}).items():
+        state = self.state_manager.get_all_states()
+        for server_name, server_data in state.items():
             if tool_name in server_data.get("tools", {}):
                 return server_name
         return ""

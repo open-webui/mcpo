@@ -15,8 +15,8 @@ def create_app(*,
         cors_allow_origins = ["*"]
 
     # Delegate to mcpo.main to construct the app using the current parameters.
-    from mcpo.main import build_app
-    return build_app(
+    from mcpo.main import build_main_app
+    return build_main_app(
         host=host,
         port=port,
         api_key=api_key or "",

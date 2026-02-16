@@ -84,10 +84,10 @@ class AnthropicClient:
             raise AnthropicError("ANTHROPIC_API_KEY environment variable is required")
             
         self._base_url = (base_url or os.getenv("ANTHROPIC_BASE_URL") or ANTHROPIC_DEFAULT_BASE_URL).rstrip("/")
-        self._timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
-        self._stream_timeout = stream_timeout if stream_timeout is not None else DEFAULT_STREAM_TIMEOUT_SECONDS
-        self._max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
-        self._enable_prompt_caching = enable_prompt_caching if enable_prompt_caching is not None else DEFAULT_ENABLE_PROMPT_CACHING
+        self._timeout = timeout if timeout is not None else float(os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "120"))
+        self._stream_timeout = stream_timeout if stream_timeout is not None else float(os.getenv("ANTHROPIC_STREAM_TIMEOUT_SECONDS", "300"))
+        self._max_retries = max_retries if max_retries is not None else int(os.getenv("ANTHROPIC_MAX_RETRIES", "2"))
+        self._enable_prompt_caching = enable_prompt_caching if enable_prompt_caching is not None else os.getenv("ANTHROPIC_ENABLE_PROMPT_CACHING", "true").lower() in ("true", "1", "yes")
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {

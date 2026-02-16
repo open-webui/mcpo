@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -42,7 +43,9 @@ class OpenRouterClient:
         self._base_url = base_url or os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         self._site_url = site_url or os.getenv("OPENROUTER_SITE_URL")
         self._app_name = app_name or os.getenv("OPENROUTER_APP_NAME")
-        self._timeout = timeout or 60.0
+        self._timeout = timeout or float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
+        self._stream_timeout = float(os.getenv("OPENROUTER_STREAM_TIMEOUT_SECONDS", "300"))
+        self._max_retries = int(os.getenv("OPENROUTER_MAX_RETRIES", "2"))
 
     def _default_headers(self) -> Dict[str, str]:
         headers = {
@@ -91,18 +94,34 @@ class OpenRouterClient:
             logger.info(f"[OPENROUTER] Payload messages: {len(payload.get('messages', []))}, tools: {len(payload.get('tools', []) or [])}")
             logger.debug(f"[OPENROUTER] Full payload: {json.dumps(payload, default=str)[:3000]}")
             
-            response = await client.post(
-                url,
-                headers=self._default_headers(),
-                content=json.dumps(payload),
-            )
-            logger.info(f"[OPENROUTER] Response status: {response.status_code}")
-            if response.status_code >= 400:
-                logger.error(f"[OPENROUTER] Error response: {response.text[:2000]}")
-            await _raise_for_response(response)
-            data = response.json()
-            logger.info(f"[OPENROUTER] Success: id={data.get('id')}, model={data.get('model')}")
-            return data
+            last_exc: Optional[Exception] = None
+            for attempt in range(self._max_retries + 1):
+                try:
+                    response = await client.post(
+                        url,
+                        headers=self._default_headers(),
+                        content=json.dumps(payload),
+                    )
+                    logger.info(f"[OPENROUTER] Response status: {response.status_code}")
+                    if response.status_code >= 500 and attempt < self._max_retries:
+                        logger.warning(f"[OPENROUTER] Server error {response.status_code}, retry {attempt + 1}/{self._max_retries}")
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    if response.status_code >= 400:
+                        logger.error(f"[OPENROUTER] Error response: {response.text[:2000]}")
+                    await _raise_for_response(response)
+                    data = response.json()
+                    logger.info(f"[OPENROUTER] Success: id={data.get('id')}, model={data.get('model')}")
+                    return data
+                except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+                    last_exc = exc
+                    if attempt < self._max_retries:
+                        logger.warning(f"[OPENROUTER] {type(exc).__name__}, retry {attempt + 1}/{self._max_retries}")
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        raise
+            # Should not reach here, but if it does:
+            raise last_exc  # type: ignore[misc]
 
     async def chat_completion_stream(
         self,
@@ -131,7 +150,7 @@ class OpenRouterClient:
             payload["reasoning_effort"] = reasoning_effort
 
         async def _iter() -> AsyncIterator[str]:
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with httpx.AsyncClient(timeout=self._stream_timeout) as client:
                 url = f"{self._base_url}/chat/completions"
                 logger.info(f"[OPENROUTER] Stream request: model={model}, url={url}")
                 logger.info(f"[OPENROUTER] Stream payload messages: {len(payload.get('messages', []))}, tools: {len(payload.get('tools', []) or [])}")

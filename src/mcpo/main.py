@@ -186,7 +186,7 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
     sub_app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_allow_origins or ["*"],
-        allow_credentials=True,
+        allow_credentials=cors_allow_origins is not None and cors_allow_origins != ["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -646,11 +646,21 @@ async def create_internal_mcpo_server(main_app: FastAPI, api_dependency) -> Fast
     )
     async def install_python_package(request: Request, body: InstallPythonPackageBody):
         """Install a Python package using pip."""
+        # Block in read-only mode
+        main_app = request.app
+        if getattr(main_app.state, 'read_only_mode', False):
+            return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode"}})
         try:
             package_name = body.package_name if body else None
             if not package_name or not isinstance(package_name, str):
                 logger.warning("install_python_package: Missing package_name parameter")
                 return JSONResponse(status_code=422, content={"ok": False, "error": {"message": "Missing package_name"}})
+
+            # Validate package name: alphanumeric, hyphens, underscores, dots, and optional version spec
+            import re as _re
+            if not _re.match(r'^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?(\[.*\])?(([<>=!~]=?|@)[A-Za-z0-9._*+-]*)*$', package_name):
+                logger.warning(f"install_python_package: Invalid package name '{package_name}'")
+                return JSONResponse(status_code=422, content={"ok": False, "error": {"message": f"Invalid package name: {package_name}"}})
 
             logger.info(f"install_python_package: Starting installation of package '{package_name}'")
 
@@ -1234,7 +1244,7 @@ async def build_main_app(
     main_app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_allow_origins or ["*"],
-        allow_credentials=True,
+        allow_credentials=cors_allow_origins is not None and cors_allow_origins != ["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )

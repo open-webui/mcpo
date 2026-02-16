@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
     ASGITransport = None  # type: ignore
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_time_server_new_york_openapi_discovery():
     """Integration test: discover time server tool via OpenAPI and request New York time.

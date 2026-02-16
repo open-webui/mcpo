@@ -156,7 +156,7 @@ async def _fetch_google_models() -> List[Dict[str, str]]:
     url = f"{base_url}/v1beta/models"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, params={"key": api_key})
+            resp = await client.get(url, headers={"x-goog-api-key": api_key})
             resp.raise_for_status()
             payload = resp.json()
             data = payload.get("models") or []
@@ -805,7 +805,7 @@ class GeminiProvider(BaseCompletionProvider):
         logger.info(f"[COMPLETIONS] Gemini non-stream request: model={payload.model}, url={url}")
         logger.debug(f"[COMPLETIONS] Gemini request body: {json.dumps(body, default=str)[:2000]}")
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, params={"key": self.api_key}, json=body)
+            response = await client.post(url, headers={"x-goog-api-key": self.api_key}, json=body)
             logger.info(f"[COMPLETIONS] Gemini response: status={response.status_code}")
             try:
                 response.raise_for_status()
@@ -826,7 +826,7 @@ class GeminiProvider(BaseCompletionProvider):
         url = f"{self.base_url}/v1beta/models/{payload.model}:streamGenerateContent"
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
-                "POST", url, params={"key": self.api_key}, json=body
+                "POST", url, headers={"x-goog-api-key": self.api_key}, json=body
             ) as response:
                 try:
                     response.raise_for_status()

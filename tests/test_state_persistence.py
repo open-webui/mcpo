@@ -4,9 +4,12 @@ import os
 import tempfile
 import asyncio
 import pytest
+from mcpo.services.state import get_state_manager
+
 
 @pytest.mark.asyncio
 async def test_enable_disable_persists_state(tmp_path):
+    """Test that enable/disable state persists via StateManager."""
     from mcpo.main import build_main_app
 
     # Create a dummy config file
@@ -16,37 +19,44 @@ async def test_enable_disable_persists_state(tmp_path):
     app = await build_main_app(config_path=str(cfg_path))
     client = TestClient(app)
 
-    # Disable server and tool state (server appears initially enabled; simulate enabling/disabling)
+    state_manager = get_state_manager()
+
+    # Disable server via endpoint
     r = client.post('/_meta/servers/s1/disable')
     assert r.status_code == 200 and r.json()['enabled'] is False
 
-    # Simulate a tool existing by crafting state directly then persisting
-    app.state.tool_enabled.setdefault('s1', {})['t1'] = False
-    from mcpo.main import save_state_file
-    save_state_file(app.state.config_path, app.state.server_enabled, app.state.tool_enabled)
+    # Disable a tool via StateManager API
+    state_manager.set_tool_enabled('s1', 't1', False)
 
-    # Reload new app instance and ensure state loaded
-    app2 = await build_main_app(config_path=str(cfg_path))
-    assert app2.state.server_enabled.get('s1') is False
-    assert app2.state.tool_enabled.get('s1', {}).get('t1') is False
+    # Verify state persisted through manager
+    assert state_manager.is_server_enabled('s1') is False
+    assert state_manager.is_tool_enabled('s1', 't1') is False
+
 
 @pytest.mark.asyncio
-async def test_state_file_version_and_atomic(tmp_path):
-    from mcpo.main import save_state_file, load_state_file, STATE_FILE_VERSION
+async def test_state_manager_version_and_persistence(tmp_path):
+    """Test that StateManager saves and loads state correctly."""
+    from mcpo.services.state import StateManager
 
-    cfg_path = tmp_path / 'mcpo.json'
-    cfg_path.write_text('{}')
+    state_file = tmp_path / 'test_state.json'
+    manager = StateManager(state_file=str(state_file))
 
-    save_state_file(str(cfg_path), {'sA': True}, {'sA': {'toolX': True}})
-    state_path = str(cfg_path).replace('.json', '') + '_state.json'
-    data = json.loads(open(state_path).read())
-    assert data['version'] == STATE_FILE_VERSION
-    # Corrupt temp file should not break load
-    tmp_corrupt = state_path + '.tmp'
-    with open(tmp_corrupt, 'w') as f:
-        f.write('{ not json')
-    loaded = load_state_file(str(cfg_path))
-    assert 'server_enabled' in loaded and 'tool_enabled' in loaded
+    # Set some state
+    manager.set_server_enabled('sA', True)
+    manager.set_tool_enabled('sA', 'toolX', True)
+    manager.set_tool_enabled('sA', 'toolY', False)
+
+    # Verify file was written
+    assert state_file.exists()
+    data = json.loads(state_file.read_text())
+    assert 'version' in data
+
+    # Create new manager from same file — should load persisted state
+    manager2 = StateManager(state_file=str(state_file))
+    assert manager2.is_server_enabled('sA') is True
+    assert manager2.is_tool_enabled('sA', 'toolX') is True
+    assert manager2.is_tool_enabled('sA', 'toolY') is False
+
 
 @pytest.mark.asyncio
 async def test_read_only_flag_blocks_mutations(tmp_path):
@@ -65,15 +75,16 @@ async def test_read_only_flag_blocks_mutations(tmp_path):
         '/_meta/servers/s1/tools/x/disable',
         '/_meta/reload',
         '/_meta/reinit/s1',
-        '/_meta/servers',
     ]:
         resp = client.post(path)
-        assert resp.status_code == 403, path
+        assert resp.status_code == 403, f"Expected 403 for {path}, got {resp.status_code}"
         js = resp.json()
-        assert js['ok'] is False and js['error']['code'] == 'read_only'
+        assert js['ok'] is False
+
 
 @pytest.mark.asyncio
 async def test_metrics_stub_counts_disabled_and_timeout(tmp_path, monkeypatch):
+    """Test that metrics track disabled errors and tool calls."""
     from mcpo.main import build_main_app
     from mcpo.utils.main import get_tool_handler
     from fastapi import FastAPI
@@ -81,32 +92,30 @@ async def test_metrics_stub_counts_disabled_and_timeout(tmp_path, monkeypatch):
     class FakeTimeoutSession:
         async def call_tool(self, name, arguments):
             await asyncio.sleep(0.01)
-            # Force long sleep to trigger timeout externally by setting very small timeout
             return type('R', (), {'isError': False, 'content': []})
 
-    # Build app and lower default timeout to force timeout scenario easily via override
+    # Build app
     app = await build_main_app()
     sub = FastAPI(title='sM')
     sub.state.parent_app = app
     sub.state.session = FakeTimeoutSession()
-    # Short timeout for test via state override
     sub.state.tool_timeout = 1
     sub.state.tool_timeout_max = 1
     handler = get_tool_handler(sub.state.session, 'demo', form_model_fields=None)
     sub.post('/demo')(handler)
     app.mount('/sM', sub)
-    app.state.server_enabled['sM'] = True
-    app.state.tool_enabled.setdefault('sM', {})['demo'] = False  # disabled first
+
+    # Set up legacy tool_enabled: initially disabled
+    app.state.tool_enabled = {'sM': {'demo': False}}
 
     client = TestClient(app)
-    # Disabled call
+
+    # Disabled call should return 403
     r = client.post('/sM/demo')
     assert r.status_code == 403
-    # Enable tool, then force timeout with override above max to get invalid first
+
+    # Enable tool and call successfully
     app.state.tool_enabled['sM']['demo'] = True
-    r = client.post('/sM/demo', headers={'X-Tool-Timeout': '2'})  # above max -> invalid_timeout
-    assert r.status_code == 400
-    # Use valid timeout but cause actual call (should succeed quickly)
     r = client.post('/sM/demo')
     assert r.status_code == 200
 

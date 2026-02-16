@@ -22,10 +22,6 @@ router = APIRouter()
 from mcpo.services.state import get_state_manager
 from mcpo.services.logging import get_log_manager
 
-def error_envelope(message: str, code: str = "error") -> dict:
-    """Create a standardized error response envelope."""
-    return {"ok": False, "error": {"message": message, "code": code}}
-
 # Import remaining dependencies from main (to be phased out)
 from mcpo.main import (
     load_config,
@@ -443,7 +439,7 @@ async def clear_logs_all(request: Request, source: Optional[str] = None):
 @router.post("/reload")
 async def reload_config(request: Request):
     main_app = request.app
-    if getattr(main_app.state, "read_only", False):
+    if getattr(main_app.state, "read_only_mode", False):
         return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
     path = getattr(main_app.state, 'config_path', None)
     if not path:
@@ -465,7 +461,7 @@ async def reload_config(request: Request):
 @router.post("/reinit/{server_name}")
 async def reinit_server(server_name: str, request: Request):
     main_app = request.app
-    if getattr(main_app.state, "read_only", False):
+    if getattr(main_app.state, "read_only_mode", False):
         return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
     path = getattr(main_app.state, 'config_path', None)
     if not path:
@@ -541,7 +537,7 @@ async def install_dependencies():
 async def enable_server(server_name: str, request: Request):
     """Enable a server."""
     try:
-        if getattr(request.app.state, "read_only", False):
+        if getattr(request.app.state, "read_only_mode", False):
             return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
         state_manager = get_state_manager()
         state_manager.set_server_enabled(server_name, True)
@@ -563,7 +559,7 @@ async def enable_server(server_name: str, request: Request):
 async def disable_server(server_name: str, request: Request):
     """Disable a server."""
     try:
-        if getattr(request.app.state, "read_only", False):
+        if getattr(request.app.state, "read_only_mode", False):
             return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
         state_manager = get_state_manager()
         state_manager.set_server_enabled(server_name, False)
@@ -585,7 +581,7 @@ async def disable_server(server_name: str, request: Request):
 async def enable_tool(server_name: str, tool_name: str, request: Request):
     """Enable a specific tool."""
     try:
-        if getattr(request.app.state, "read_only", False):
+        if getattr(request.app.state, "read_only_mode", False):
             return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
         state_manager = get_state_manager()
         state_manager.set_tool_enabled(server_name, tool_name, True)
@@ -607,7 +603,7 @@ async def enable_tool(server_name: str, tool_name: str, request: Request):
 async def disable_tool(server_name: str, tool_name: str, request: Request):
     """Disable a specific tool."""
     try:
-        if getattr(request.app.state, "read_only", False):
+        if getattr(request.app.state, "read_only_mode", False):
             return JSONResponse(status_code=403, content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}})
         state_manager = get_state_manager()
         state_manager.set_tool_enabled(server_name, tool_name, False)
