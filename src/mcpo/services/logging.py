@@ -2,6 +2,7 @@
 Logging service for centralized log buffer management and UI integration.
 """
 import threading
+from collections import deque
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from enum import Enum
@@ -56,7 +57,7 @@ class LogManager:
 
     def __init__(self, max_entries: int = 100):
         self.max_entries = max_entries
-        self._log_buffer: List[LogEntry] = []
+        self._log_buffer: deque = deque(maxlen=max_entries)
         self._lock = threading.Lock()
         self._sequence = 0
 
@@ -67,7 +68,7 @@ class LogManager:
         category: str = "general",
         source: str = "openapi",
         **kwargs,
-    ) -> None:
+    ) -> LogEntry:
         """Add a log entry to the buffer."""
         timestamp = kwargs.pop("timestamp", None)
 
@@ -83,9 +84,6 @@ class LogManager:
                 **kwargs,
             )
             self._log_buffer.append(entry)
-            # Keep only the most recent entries
-            if len(self._log_buffer) > self.max_entries:
-                self._log_buffer = self._log_buffer[-self.max_entries :]
         return entry
 
     def get_logs(
@@ -98,7 +96,7 @@ class LogManager:
     ) -> List[Dict[str, Any]]:
         """Get all logs, optionally filtered by category or source."""
         with self._lock:
-            logs = self._log_buffer
+            logs = list(self._log_buffer)
             if category:
                 logs = [log for log in logs if log.category == category]
             if source:
@@ -142,7 +140,10 @@ class LogManager:
                     return False
                 return True
 
-            self._log_buffer = [log for log in self._log_buffer if keep(log)]
+            self._log_buffer = deque(
+                (log for log in self._log_buffer if keep(log)),
+                maxlen=self.max_entries,
+            )
 
     def get_log_count(self, source: str = None) -> int:
         """Get total number of log entries."""
@@ -173,12 +174,15 @@ class LogManager:
 
 # Global instance for backward compatibility
 _global_log_manager = None
+_global_log_lock = threading.Lock()
 
 def get_log_manager(max_entries: int = 2000) -> LogManager:
     """Get or create global log manager instance."""
     global _global_log_manager
     if _global_log_manager is None:
-        _global_log_manager = LogManager(max_entries)
+        with _global_log_lock:
+            if _global_log_manager is None:
+                _global_log_manager = LogManager(max_entries)
     elif max_entries and max_entries > _global_log_manager.max_entries:
         _global_log_manager.max_entries = max_entries
     return _global_log_manager

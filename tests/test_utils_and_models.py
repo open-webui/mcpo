@@ -85,11 +85,11 @@ class TestInterpolateEnvPlaceholders:
         assert interpolate_env_placeholders(None) == {}
 
     def test_only_uppercase_digits_underscore_matched(self, monkeypatch):
-        """Lowercase letters in the placeholder name are NOT matched."""
-        monkeypatch.setenv("myvar", "should-not-appear")
+        """Lowercase letters in the placeholder name are now matched (BUG-021 fix)."""
+        monkeypatch.setenv("myvar", "should-appear")
         result = interpolate_env_placeholders({"key": "${myvar}"})
-        # regex [A-Z0-9_]+ won't match lowercase → literal string stays
-        assert result["key"] == "${myvar}"
+        # regex [A-Za-z0-9_]+ now matches lowercase → value is interpolated
+        assert result["key"] == "should-appear"
 
 
 class TestInterpolateEnvPlaceholdersInConfig:

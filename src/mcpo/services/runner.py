@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 
 from mcp.client.session import ClientSession
 from mcp import types
-from mcp.client.session import ClientSession
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)

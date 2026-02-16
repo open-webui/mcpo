@@ -12,7 +12,7 @@ def interpolate_env_placeholders(config_env: Optional[Dict[str, Any]]) -> Dict[s
     if not isinstance(config_env, dict):
         return {}
 
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
+    pattern = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 
     result = dict(config_env)
     for k, v in list(result.items()):

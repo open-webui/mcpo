@@ -1,14 +1,9 @@
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import base64
-
-from passlib.context import CryptContext
-from datetime import UTC, datetime, timedelta
-
-import jwt
-from typing import Optional, Union, List, Dict
+import hmac
 
 
 ALGORITHM = "HS256"
@@ -27,7 +22,7 @@ def get_verify_api_key(api_key: str):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         token = authorization.credentials
-        if token != api_key:
+        if not hmac.compare_digest(token, api_key):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid API key",
@@ -66,7 +61,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             # Handle Bearer token auth
             if authorization.startswith("Bearer "):
                 token = authorization[7:]  # Remove "Bearer " prefix
-                if token != self.api_key:
+                if not hmac.compare_digest(token, self.api_key):
                     return JSONResponse(
                         status_code=403, content={"detail": "Invalid API key"}
                     )
@@ -79,7 +74,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                     # Basic auth format is username:password
                     username, password = decoded.split(":", 1)
                     # Any username is allowed, but password must match api_key
-                    if password != self.api_key:
+                    if not hmac.compare_digest(password, self.api_key):
                         return JSONResponse(
                             status_code=403, content={"detail": "Invalid credentials"}
                         )

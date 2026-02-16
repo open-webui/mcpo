@@ -527,7 +527,7 @@ def get_tool_handler(
                     else:
                         aggregator.record_error("unexpected")
                     # Convert to standardized error envelope
-                    status = he.status_code if hasattr(he, "status_code") else 500
+                    http_status = he.status_code if hasattr(he, "status_code") else 500
                     msg = he.detail.get("message") if isinstance(he.detail, dict) else str(he.detail)
                     env = {"ok": False, "error": {"message": msg}}
                     if isinstance(he.detail, dict) and he.detail.get("code"):
@@ -536,7 +536,7 @@ def get_tool_handler(
                     if structured:
                         env["output"] = {"type": "collection", "items": []}
                     from fastapi.responses import JSONResponse
-                    return JSONResponse(status_code=status, content=env)
+                    return JSONResponse(status_code=http_status, content=env)
                 except McpError as e:
                     # Map MCP errors to HTTP and record unexpected
                     aggregator.record_error("unexpected")
@@ -650,7 +650,7 @@ def get_tool_handler(
                     else:
                         aggregator.record_error("unexpected")
                     from fastapi.responses import JSONResponse
-                    status = he.status_code if hasattr(he, "status_code") else 500
+                    http_status = he.status_code if hasattr(he, "status_code") else 500
                     msg = he.detail.get("message") if isinstance(he.detail, dict) else str(he.detail)
                     env = {"ok": False, "error": {"message": msg}}
                     if isinstance(he.detail, dict) and he.detail.get("code"):
@@ -658,7 +658,7 @@ def get_tool_handler(
                     structured = getattr(request.app.state, "structured_output", False)
                     if structured:
                         env["output"] = {"type": "collection", "items": []}
-                    return JSONResponse(status_code=status, content=env)
+                    return JSONResponse(status_code=http_status, content=env)
                 except McpError as e:
                     aggregator.record_error("unexpected")
                     status_code = MCP_ERROR_TO_HTTP_STATUS.get(e.error.code, 500)
@@ -684,11 +684,12 @@ def get_tool_handler(
 
 def create_error_envelope(message: str, code: str = None, data: Any = None) -> Dict[str, Any]:
     """Create a standardized error response envelope for API responses."""
+    from datetime import datetime, timezone
     envelope = {
         "ok": False,
         "error": {
             "message": message,
-            "timestamp": json.dumps({"$date": {"$numberLong": str(int(__import__('time').time() * 1000))}}),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     }
     if code:

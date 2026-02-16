@@ -2,6 +2,8 @@
 State management service for server and tool state persistence.
 """
 import json
+import os
+import tempfile
 import threading
 from typing import Dict, Any, List
 from pathlib import Path
@@ -55,8 +57,15 @@ class StateManager:
                     "model_states": self._model_states,
                     "favorite_models": self._favorite_models,
                 }
-                with open(self.state_file_path, 'w') as f:
-                    json.dump(state_data, f, indent=2)
+                dir_path = os.path.dirname(os.path.abspath(self.state_file_path))
+                fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'w') as f:
+                        json.dump(state_data, f, indent=2)
+                    os.replace(tmp_path, self.state_file_path)
+                except:
+                    os.unlink(tmp_path)
+                    raise
             except Exception as e:
                 # Log error but don't crash
                 import logging
@@ -170,10 +179,13 @@ class StateManager:
 
 # Global instance for backward compatibility
 _global_state_manager = None
+_global_state_lock = threading.Lock()
 
 def get_state_manager(state_file_path: str = "mcpo_state.json") -> StateManager:
     """Get or create global state manager instance."""
     global _global_state_manager
     if _global_state_manager is None:
-        _global_state_manager = StateManager(state_file_path)
+        with _global_state_lock:
+            if _global_state_manager is None:
+                _global_state_manager = StateManager(state_file_path)
     return _global_state_manager

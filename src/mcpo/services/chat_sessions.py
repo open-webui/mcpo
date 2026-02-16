@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ class ChatSession:
     model: str
     system_prompt: Optional[str]
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     messages: List[Dict[str, Any]] = field(default_factory=list)
     steps: List[ChatStep] = field(default_factory=list)
     tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
@@ -46,6 +48,7 @@ class ChatSession:
             "id": self.id,
             "model": self.model,
             "createdAt": self.created_at.isoformat(),
+            "lastAccessed": self.last_accessed.isoformat(),
             "systemPrompt": self.system_prompt,
             "messages": list(self.messages),
             "steps": [step.to_dict() for step in self.steps],
@@ -66,9 +69,22 @@ class ChatSession:
 class ChatSessionManager:
     """Thread-safe session manager for chat interactions."""
 
+    MAX_SESSIONS = int(os.environ.get("MCPO_MAX_SESSIONS", "100"))
+    SESSION_TTL_SECONDS = int(os.environ.get("MCPO_SESSION_TTL_SECONDS", "3600"))
+
     def __init__(self) -> None:
         self._sessions: Dict[str, ChatSession] = {}
         self._lock = asyncio.Lock()
+
+    def _cleanup_expired(self) -> None:
+        """Remove sessions older than TTL. Must be called while holding self._lock."""
+        now = datetime.now(timezone.utc)
+        expired = [
+            sid for sid, s in self._sessions.items()
+            if (now - s.last_accessed).total_seconds() > self.SESSION_TTL_SECONDS
+        ]
+        for sid in expired:
+            del self._sessions[sid]
 
     async def create_session(
         self,
@@ -95,13 +111,19 @@ class ChatSessionManager:
         )
 
         async with self._lock:
+            self._cleanup_expired()
+            if len(self._sessions) >= self.MAX_SESSIONS:
+                oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_accessed)
+                del self._sessions[oldest_id]
             self._sessions[session_id] = session
         return session
 
     async def get_session(self, session_id: str) -> ChatSession:
         async with self._lock:
             try:
-                return self._sessions[session_id]
+                session = self._sessions[session_id]
+                session.last_accessed = datetime.now(timezone.utc)
+                return session
             except KeyError as exc:
                 raise KeyError(f"Chat session '{session_id}' not found") from exc
 

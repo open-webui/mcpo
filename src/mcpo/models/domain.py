@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Set
 from enum import Enum
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class ServerType(str, Enum):
@@ -60,15 +60,17 @@ class ServerConfiguration(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     timeout: Optional[float] = None
 
-    @validator('command')
-    def validate_stdio_command(cls, v, values):
-        if values.get('server_type') == ServerType.STDIO and not v:
+    @field_validator('command')
+    @classmethod
+    def validate_stdio_command(cls, v, info):
+        if info.data.get('server_type') == ServerType.STDIO and not v:
             raise ValueError('stdio servers require a command')
         return v
 
-    @validator('url')
-    def validate_remote_url(cls, v, values):
-        server_type = values.get('server_type')
+    @field_validator('url')
+    @classmethod
+    def validate_remote_url(cls, v, info):
+        server_type = info.data.get('server_type')
         if server_type in (ServerType.SSE, ServerType.STREAMABLE_HTTP) and not v:
             raise ValueError('remote servers require a URL')
         return v
