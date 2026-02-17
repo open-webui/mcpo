@@ -288,8 +288,76 @@ async function loadAboutContent() {
     }
 }
 
+async function fetchSkills() {
+    try {
+        const { data } = await fetchJson('/_meta/skills');
+        if (data && data.ok && Array.isArray(data.skills)) {
+            return data.skills;
+        }
+    } catch (error) {
+        console.error('Error fetching skills:', error);
+    }
+    return [];
+}
+
+async function fetchSkill(skillId) {
+    try {
+        const { data } = await fetchJson(`/_meta/skills/${encodeURIComponent(skillId)}`);
+        if (data && data.ok && data.skill) {
+            return data.skill;
+        }
+    } catch (error) {
+        console.error('Error fetching skill:', error);
+    }
+    return null;
+}
+
+async function saveSkill(payload) {
+    try {
+        const { data } = await fetchJson('/_meta/skills', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+        });
+        return !!(data && data.ok);
+    } catch (error) {
+        console.error('Error saving skill:', error);
+        return false;
+    }
+}
+
+async function deleteSkill(skillId) {
+    try {
+        const { data } = await fetchJson(`/_meta/skills/${encodeURIComponent(skillId)}`, {
+            method: 'DELETE',
+        });
+        return !!(data && data.ok);
+    } catch (error) {
+        console.error('Error deleting skill:', error);
+        return false;
+    }
+}
+
+async function setSkillEnabled(skillId, enabled) {
+    const suffix = enabled ? 'enable' : 'disable';
+    try {
+        const { data } = await fetchJson(`/_meta/skills/${encodeURIComponent(skillId)}/${suffix}`, {
+            method: 'POST',
+        });
+        return !!(data && data.ok);
+    } catch (error) {
+        console.error('Error toggling skill:', error);
+        return false;
+    }
+}
+
 // Expose for inline handlers
 window.saveConfigContent = saveConfigContent;
 window.installDependencies = installDependencies;
 window.saveRequirements = saveRequirements;
 window.loadAboutContent = loadAboutContent;
+window.fetchSkills = fetchSkills;
+window.fetchSkill = fetchSkill;
+window.saveSkill = saveSkill;
+window.deleteSkill = deleteSkill;
+window.setSkillEnabled = setSkillEnabled;

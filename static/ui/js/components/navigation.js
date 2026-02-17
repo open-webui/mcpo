@@ -4,6 +4,7 @@
 const PAGE_HEADERS = {
     'tools-page': { title: 'MCP Servers', subtitle: 'Manage your MCP server connections' },
     'chat-page': { title: 'Chat', subtitle: 'Test and refine models forwarded by OpenHubUI' },
+    'skills-page': { title: 'Skills', subtitle: 'Create, enable, and maintain agent skills' },
     'logs-page': { title: 'Logs', subtitle: 'Server activity and debug information' },
     'config-page': { title: 'Configuration', subtitle: 'Server settings and client config export' },
     'about-page': { title: 'About', subtitle: 'Information about OpenHubUI' }
@@ -66,6 +67,9 @@ function showPage(pageId) {
         }
         if (targetId === 'chat-page' && typeof window.initChatPage === 'function') {
             window.initChatPage();
+        }
+        if (targetId === 'skills-page' && typeof window.initSkillsPage === 'function') {
+            window.initSkillsPage();
         }
     } catch (e) {
         console.warn('[NAV] Page initializer error:', e);

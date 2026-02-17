@@ -32,6 +32,9 @@
                 <div class="nav-item" data-page="chat">
                     <span>Chat</span>
                 </div>
+                <div class="nav-item" data-page="skills">
+                    <span>Skills</span>
+                </div>
                 <div class="nav-item" data-page="logs">
                     <span>Logs</span>
                 </div>
@@ -179,6 +182,32 @@
                     </div>
                 </div>
                 
+                <!-- Skills Page -->
+                <div class="page" id="skills-page">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Agent Skills</h2>
+                        </div>
+                        <div class="card-content">
+                            <p class="section-description">Manage markdown skill packs injected into chat and completions requests.</p>
+                            <div class="config-actions skills-toolbar">
+                                <select id="skills-select" class="config-editor skills-select"></select>
+                                <button class="btn" id="skills-refresh-btn" type="button">Refresh</button>
+                                <button class="btn" id="skills-new-btn" type="button">New</button>
+                                <button class="btn" id="skills-toggle-btn" type="button">Enable/Disable</button>
+                                <button class="btn" id="skills-delete-btn" type="button">Delete</button>
+                            </div>
+                            <input id="skills-id-input" class="config-editor skills-input" placeholder="skill-id" />
+                            <input id="skills-title-input" class="config-editor skills-input" placeholder="Skill title" />
+                            <textarea id="skills-description-input" class="config-editor skills-description" placeholder="Short description"></textarea>
+                            <textarea id="skills-content-input" class="config-editor skills-content" placeholder="Skill markdown content"></textarea>
+                            <div class="config-actions">
+                                <button class="btn btn-primary" id="skills-save-btn" type="button">Save Skill</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Chat Page -->
                 <div class="page" id="chat-page">
                     <div class="chat-page-layout">
@@ -193,6 +222,16 @@
                                         <input id="chat-model-search" type="search" placeholder="Search models..." />
                                     </div>
                                     <div id="chat-model-list-items"></div>
+                                </div>
+                            </div>
+                            <div class="chat-model-picker chat-skills-panel">
+                                <div class="chat-model-row">
+                                    <div class="chat-skills-label">Skills</div>
+                                    <button class="btn btn-ghost chat-model-toggle" id="chat-skill-toggle" type="button" title="Choose skills">+</button>
+                                </div>
+                                <div id="chat-active-skills" class="chat-active-skills"></div>
+                                <div id="chat-skill-list" class="chat-model-list hidden">
+                                    <div id="chat-skill-list-items"></div>
                                 </div>
                             </div>
                         </div>
@@ -233,6 +272,7 @@
     <script src="/ui/js/components/navigation.js?v=20250930222949"></script>
     <script src="/ui/js/components/servers.js?v=20250930222949"></script>
     <script src="/ui/js/pages/config.js?v=20250930222949"></script>
+    <script src="/ui/js/pages/skills.js?v=20260211"></script>
     <script src="/ui/js/pages/chat.js?v=20250930222949"></script>
     <script src="/ui/js/core/globals.js?v=20250930222949"></script>
     <script src="/ui/js/core/app.js?v=20250930222949"></script>

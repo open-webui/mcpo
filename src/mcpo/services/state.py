@@ -17,6 +17,7 @@ class StateManager:
         self._server_states = {}  # {server_name: {"enabled": bool, "tools": {tool_name: bool}}}
         self._provider_states = {}  # {provider_id: {"enabled": bool}}
         self._model_states = {}  # {model_id: {"enabled": bool}}
+        self._skill_states = {}  # {skill_id: {"enabled": bool}}
         self._favorite_models: List[str] = []  # List of starred model IDs
         # Use a re-entrant lock because save_state is called from within other
         # lock-protected methods, and a standard Lock would deadlock.
@@ -33,17 +34,20 @@ class StateManager:
                         self._server_states = data.get('server_states', {})
                         self._provider_states = data.get('provider_states', {})
                         self._model_states = data.get('model_states', {})
+                        self._skill_states = data.get('skill_states', {})
                         self._favorite_models = data.get('favorite_models', [])
                 else:
                     self._server_states = {}
                     self._provider_states = {}
                     self._model_states = {}
+                    self._skill_states = {}
                     self._favorite_models = []
             except Exception:
                 # If loading fails, start with empty state
                 self._server_states = {}
                 self._provider_states = {}
                 self._model_states = {}
+                self._skill_states = {}
                 self._favorite_models = []
             return self._server_states
     
@@ -55,6 +59,7 @@ class StateManager:
                     "server_states": self._server_states,
                     "provider_states": self._provider_states,
                     "model_states": self._model_states,
+                    "skill_states": self._skill_states,
                     "favorite_models": self._favorite_models,
                 }
                 dir_path = os.path.dirname(os.path.abspath(self.state_file_path))
@@ -144,6 +149,24 @@ class StateManager:
     def get_all_model_states(self) -> Dict[str, Any]:
         with self._lock:
             return dict(self._model_states)
+
+    # --- Skills ---
+    def get_skill_state(self, skill_id: str) -> Dict[str, Any]:
+        with self._lock:
+            return self._skill_states.get(skill_id, {"enabled": True})
+
+    def set_skill_enabled(self, skill_id: str, enabled: bool) -> None:
+        with self._lock:
+            self._skill_states[skill_id] = {"enabled": bool(enabled)}
+            self.save_state()
+
+    def is_skill_enabled(self, skill_id: str) -> bool:
+        with self._lock:
+            return self._skill_states.get(skill_id, {}).get("enabled", True)
+
+    def get_all_skill_states(self) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self._skill_states)
 
     # --- Favorite Models ---
     def get_favorite_models(self) -> List[str]:

@@ -2,13 +2,36 @@
 Admin router for server management and configuration operations.
 """
 import logging
+import re
 from typing import Dict, Any
 from fastapi import FastAPI, APIRouter, Depends, Request, HTTPException
+from fastapi.responses import JSONResponse
 import os
+from pydantic import BaseModel, Field
+
+from mcpo.services.state import get_state_manager
+from mcpo.services.skills import (
+    compile_skills_system_prompt,
+    delete_skill_file,
+    get_skill,
+    list_skills,
+    upsert_skill_file,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _admin_error_envelope(message: str, code: str = "error") -> dict:
+    return {"ok": False, "error": {"message": message, "code": code}}
+
+
+class SkillUpsertRequest(BaseModel):
+    id: str = Field(..., description="Stable skill ID")
+    title: str = Field(..., description="Display name")
+    description: str = Field("", description="Short description")
+    content: str = Field(..., description="Skill markdown body")
 
 # Initialize global variable first
 _FASTMCP_AVAILABLE = None
@@ -241,3 +264,138 @@ def update_env_vars(data: Dict[str, str], request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/skills")
+async def list_agent_skills():
+    skills = list_skills()
+    return {
+        "ok": True,
+        "skills": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "description": item.description,
+                "enabled": item.enabled,
+                "priority": item.priority,
+                "scopes": item.scopes or [],
+                "providers": item.providers or [],
+                "models": item.models or [],
+                "tags": item.tags or [],
+                "sourcePath": item.source_path,
+            }
+            for item in skills
+        ],
+    }
+
+
+@router.get("/skills/{skill_id}")
+async def get_agent_skill(skill_id: str):
+    skill = get_skill(skill_id)
+    if not skill:
+        return JSONResponse(
+            status_code=404,
+            content=_admin_error_envelope("Skill not found", code="not_found"),
+        )
+    return {
+        "ok": True,
+        "skill": {
+            "id": skill.id,
+            "title": skill.title,
+            "description": skill.description,
+            "content": skill.content,
+            "enabled": skill.enabled,
+            "priority": skill.priority,
+            "scopes": skill.scopes or [],
+            "providers": skill.providers or [],
+            "models": skill.models or [],
+            "tags": skill.tags or [],
+            "sourcePath": skill.source_path,
+        },
+    }
+
+
+@router.post("/skills")
+async def upsert_agent_skill(payload: SkillUpsertRequest, request: Request):
+    if getattr(request.app.state, "read_only_mode", False):
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}},
+        )
+    try:
+        skill = upsert_skill_file(
+            skill_id=payload.id,
+            title=payload.title,
+            description=payload.description,
+            content=payload.content,
+        )
+        return {
+            "ok": True,
+            "skill": {
+                "id": skill.id,
+                "title": skill.title,
+                "description": skill.description,
+                "enabled": skill.enabled,
+                "priority": skill.priority,
+            },
+        }
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content=_admin_error_envelope(f"Failed to save skill: {exc}", code="save_failed"),
+        )
+
+
+@router.delete("/skills/{skill_id}")
+async def delete_agent_skill(skill_id: str, request: Request):
+    if getattr(request.app.state, "read_only_mode", False):
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}},
+        )
+    deleted = delete_skill_file(skill_id)
+    if not deleted:
+        return JSONResponse(
+            status_code=404,
+            content=_admin_error_envelope("Skill not found", code="not_found"),
+        )
+    return {"ok": True, "deleted": True}
+
+
+@router.post("/skills/{skill_id}/enable")
+async def enable_agent_skill(skill_id: str, request: Request):
+    if getattr(request.app.state, "read_only_mode", False):
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}},
+        )
+    state = get_state_manager()
+    state.set_skill_enabled(skill_id, True)
+    return {"ok": True, "enabled": True}
+
+
+@router.post("/skills/{skill_id}/disable")
+async def disable_agent_skill(skill_id: str, request: Request):
+    if getattr(request.app.state, "read_only_mode", False):
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": {"message": "Read-only mode", "code": "read_only"}},
+        )
+    state = get_state_manager()
+    state.set_skill_enabled(skill_id, False)
+    return {"ok": True, "enabled": False}
+
+
+@router.post("/skills/preview-prompt")
+async def preview_skill_prompt(payload: Dict[str, Any]):
+    scope = str(payload.get("scope") or "chat")
+    model = payload.get("model")
+    provider = payload.get("provider")
+    skill_ids = payload.get("skill_ids")
+    prompt = compile_skills_system_prompt(
+        scope=scope,
+        model=model,
+        provider=provider,
+        requested_skill_ids=skill_ids if isinstance(skill_ids, list) else None,
+    )
+    return {"ok": True, "prompt": prompt}

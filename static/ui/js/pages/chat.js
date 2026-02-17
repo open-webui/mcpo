@@ -9,6 +9,8 @@ const chatState = {
     sessionId: null,
     session: null,
     models: [],
+    skills: [],
+    selectedSkillIds: [],
     favorites: [],
     modelSearch: '',
     streaming: false,
@@ -29,6 +31,10 @@ function getChatElements() {
         modelListItems: document.getElementById('chat-model-list-items'),
         modelSearchInput: document.getElementById('chat-model-search'),
         modelFavToggle: document.getElementById('chat-model-fav-toggle'),
+        skillToggle: document.getElementById('chat-skill-toggle'),
+        skillList: document.getElementById('chat-skill-list'),
+        skillListItems: document.getElementById('chat-skill-list-items'),
+        activeSkills: document.getElementById('chat-active-skills'),
         resetBtn: document.getElementById('chat-reset-session'),
         messagesContainer: document.getElementById('chat-messages'),
         alertsContainer: document.getElementById('chat-alerts'),
@@ -55,8 +61,10 @@ async function initChatPage() {
     attachEventHandlers(els);
 
     await loadModels();
+    await loadSkills();
     await loadFavorites();
     populateModelSelect();
+    renderSkillList();
     await ensureSession();
     renderSession();
 }
@@ -78,6 +86,13 @@ function attachEventHandlers(els) {
         els.modelFavToggle.addEventListener('click', () => {
             chatState.modelPanelOpen = !chatState.modelPanelOpen;
             renderModelList();
+        });
+    }
+
+    if (els.skillToggle) {
+        els.skillToggle.addEventListener('click', () => {
+            if (!els.skillList) return;
+            els.skillList.classList.toggle('hidden');
         });
     }
 
@@ -105,6 +120,73 @@ function attachEventHandlers(els) {
     els.stopBtn.addEventListener('click', () => {
         abortStreaming();
     });
+}
+
+async function loadSkills() {
+    try {
+        chatState.skills = await fetchSkills();
+    } catch (error) {
+        console.warn('[CHAT] Failed to load skills', error);
+        chatState.skills = [];
+    }
+}
+
+function getSelectedSkillIds() {
+    return (chatState.selectedSkillIds || []).filter(Boolean);
+}
+
+function renderSkillList() {
+    const { skillListItems } = getChatElements();
+    if (!skillListItems) return;
+    skillListItems.innerHTML = '';
+    const selected = new Set(getSelectedSkillIds());
+    const enabledSkills = (chatState.skills || []).filter((item) => item.enabled !== false);
+    if (!enabledSkills.length) {
+        skillListItems.innerHTML = '<div class="empty-state">No enabled skills</div>';
+        renderActiveSkills();
+        return;
+    }
+    enabledSkills.forEach((skill) => {
+        const row = document.createElement('label');
+        row.className = 'model-row';
+        row.style.cursor = 'pointer';
+        row.innerHTML = `
+            <input type="checkbox" ${selected.has(skill.id) ? 'checked' : ''} style="margin-right:8px;" />
+            <div class="model-text">
+                <div class="model-label">${escapeHtml(skill.title || skill.id)}</div>
+                <div class="model-sub">${escapeHtml(skill.id)}</div>
+            </div>
+        `;
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        checkbox?.addEventListener('change', async () => {
+            const next = new Set(getSelectedSkillIds());
+            if (checkbox.checked) {
+                next.add(skill.id);
+            } else {
+                next.delete(skill.id);
+            }
+            chatState.selectedSkillIds = Array.from(next);
+            if (chatState.session) {
+                chatState.session.skillIds = Array.from(next);
+                await persistSessionMeta();
+            } else {
+                renderActiveSkills();
+            }
+        });
+        skillListItems.appendChild(row);
+    });
+    renderActiveSkills();
+}
+
+function renderActiveSkills() {
+    const { activeSkills } = getChatElements();
+    if (!activeSkills) return;
+    const selected = getSelectedSkillIds();
+    if (!selected.length) {
+        activeSkills.textContent = 'All enabled skills (default)';
+        return;
+    }
+    activeSkills.textContent = `Selected: ${selected.join(', ')}`;
 }
 
 async function loadModels() {
@@ -339,6 +421,7 @@ async function ensureSession() {
             // Preserve locally-selected model if user changed it before sending
             const localModel = chatState.session?.model;
             chatState.session = session;
+            chatState.selectedSkillIds = Array.isArray(session.skillIds) ? session.skillIds.slice() : [];
             if (localModel && localModel !== session.model) {
                 // User changed model locally - preserve that choice
                 chatState.session.model = localModel;
@@ -359,6 +442,7 @@ async function createSession() {
     try {
         const payload = {
             model: defaultModel,
+            skill_ids: getSelectedSkillIds(),
             system_prompt: `You are HubUI Assistant, an embedded AI agent in OpenHubUI—a companion app for Open WebUI.
 
 ## Your Purpose
@@ -425,6 +509,7 @@ The user is viewing the OpenHubUI admin interface.`,
         }
         chatState.sessionId = data.session.id;
         chatState.session = data.session;
+        chatState.selectedSkillIds = Array.isArray(data.session.skillIds) ? data.session.skillIds.slice() : [];
         chatState.stepMessages = {};
         chatState.currentStepId = null;
         localStorage.setItem(CHAT_SESSION_STORAGE_KEY, chatState.sessionId);
@@ -458,6 +543,7 @@ async function resetSession() {
             throw new Error('Failed to reset session');
         }
         chatState.session = data.session;
+        chatState.selectedSkillIds = Array.isArray(data.session.skillIds) ? data.session.skillIds.slice() : [];
         chatState.stepMessages = {};
         chatState.currentStepId = null;
         renderSession();
@@ -473,6 +559,7 @@ async function persistSessionMeta() {
     if (modelSelect && chatState.session?.model) {
         modelSelect.value = chatState.session.model;
     }
+    renderSkillList();
     renderSession();
 }
 
@@ -500,6 +587,7 @@ async function sendChatMessage() {
         message,
         stream,
         model: chatState.session.model,
+        skill_ids: getSelectedSkillIds(),
     };
 
     if (stream) {
@@ -520,6 +608,7 @@ async function sendStandardMessage(payload) {
             throw new Error(data?.detail || 'Chat request failed');
         }
         chatState.session = data.session;
+        chatState.selectedSkillIds = Array.isArray(data.session.skillIds) ? data.session.skillIds.slice() : [];
         chatState.stepMessages = {};
         chatState.currentStepId = null;
         renderSession();
@@ -784,6 +873,7 @@ async function refreshSessionState() {
         }
         
         chatState.session = latest;
+        chatState.selectedSkillIds = Array.isArray(latest.skillIds) ? latest.skillIds.slice() : [];
         renderSession();
     }
 }
@@ -811,11 +901,13 @@ function toggleFormDisabled(disabled) {
     const els = getChatElements();
     if (els.textarea) els.textarea.disabled = disabled;
     if (els.modelSelect) els.modelSelect.disabled = disabled;
+    if (els.skillToggle) els.skillToggle.disabled = disabled;
     if (els.resetBtn) els.resetBtn.disabled = disabled;
 }
 
 function renderSession() {
     renderMessages();
+    renderActiveSkills();
     renderSessionMeta();
     // Sync model dropdown with session state
     const { modelSelect } = getChatElements();

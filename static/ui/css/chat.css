@@ -66,6 +66,23 @@
     align-items: flex-start;
 }
 
+.chat-skills-panel {
+    margin-top: 12px;
+}
+
+.chat-skills-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.chat-active-skills {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
 .chat-model-row {
     display: flex;
     align-items: center;

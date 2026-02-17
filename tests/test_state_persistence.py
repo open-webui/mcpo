@@ -39,7 +39,7 @@ async def test_state_manager_version_and_persistence(tmp_path):
     from mcpo.services.state import StateManager
 
     state_file = tmp_path / 'test_state.json'
-    manager = StateManager(state_file=str(state_file))
+    manager = StateManager(state_file_path=str(state_file))
 
     # Set some state
     manager.set_server_enabled('sA', True)
@@ -49,10 +49,14 @@ async def test_state_manager_version_and_persistence(tmp_path):
     # Verify file was written
     assert state_file.exists()
     data = json.loads(state_file.read_text())
-    assert 'version' in data
+    assert 'server_states' in data
+    assert 'provider_states' in data
+    assert 'model_states' in data
+    assert 'skill_states' in data
+    assert 'favorite_models' in data
 
     # Create new manager from same file — should load persisted state
-    manager2 = StateManager(state_file=str(state_file))
+    manager2 = StateManager(state_file_path=str(state_file))
     assert manager2.is_server_enabled('sA') is True
     assert manager2.is_tool_enabled('sA', 'toolX') is True
     assert manager2.is_tool_enabled('sA', 'toolY') is False

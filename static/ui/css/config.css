@@ -44,6 +44,32 @@
     gap: 8px;
 }
 
+.skills-toolbar {
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.skills-select {
+    min-height: 38px;
+    width: 340px;
+    padding: 8px 10px;
+}
+
+.skills-input {
+    min-height: 38px;
+    margin-top: 8px;
+}
+
+.skills-description {
+    min-height: 92px;
+    margin-top: 8px;
+}
+
+.skills-content {
+    min-height: 320px;
+    margin-top: 8px;
+}
+
 .client-config .client-config-actions {
     margin: 0 0 8px 0;
     display: flex;

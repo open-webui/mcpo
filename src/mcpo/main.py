@@ -1381,25 +1381,32 @@ async def build_main_app(
             tools_total += len(server_tools)
             tools_enabled += sum(1 for enabled in server_tools.values() if enabled)
         
-        m = getattr(main_app.state, 'metrics', {})
+        from mcpo.services.metrics import get_metrics_aggregator
+        from mcpo.services.runner import get_runner_service
+
+        aggregator = get_metrics_aggregator()
+        runner = get_runner_service()
+        runner_per_tool = runner.get_metrics()
+
         per_tool_metrics = {}
-        for tname, stats in m.get('per_tool', {}).items():
+        for tname, stats in runner_per_tool.items():
             if not isinstance(stats, dict):
                 continue
             calls = stats.get('calls', 0) or 0
-            total_latency = stats.get('total_latency_ms', 0.0) or 0.0
             per_tool_metrics[tname] = {
                 'calls': calls,
                 'errors': stats.get('errors', 0) or 0,
-                'avgLatencyMs': round(total_latency / calls, 3) if calls else 0.0,
-                'maxLatencyMs': stats.get('max_latency_ms', 0.0) or 0.0,
+                'avgLatencyMs': stats.get('avgLatencyMs', 0.0) or 0.0,
+                'maxLatencyMs': stats.get('maxLatencyMs', 0.0) or 0.0,
             }
+
+        agg = aggregator.build_metrics(per_tool_metrics)
         return {"ok": True, "metrics": {
             "servers": {"total": servers_total, "enabled": servers_enabled},
             "tools": {"total": tools_total, "enabled": tools_enabled},
-            "calls": {"total": m.get("tool_calls_total", 0)},
-            "errors": {"total": m.get("tool_errors_total", 0), "byCode": m.get("tool_errors_by_code", {})},
-            "perTool": per_tool_metrics,
+            "calls": {"total": agg.get("calls", 0)},
+            "errors": agg.get("errors", {}),
+            "perTool": agg.get("perTool", {}),
         }}
 
     @main_app.post("/_meta/reload")
