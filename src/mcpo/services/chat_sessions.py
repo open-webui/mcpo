@@ -42,6 +42,7 @@ class ChatSession:
     tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
     tool_index: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     server_allowlist: Optional[List[str]] = None
+    skill_ids: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -54,6 +55,7 @@ class ChatSession:
             "steps": [step.to_dict() for step in self.steps],
             "tools": list(self.tool_definitions),
             "serverAllowlist": list(self.server_allowlist) if self.server_allowlist else None,
+            "skillIds": list(self.skill_ids),
         }
 
     def reset(self) -> None:
@@ -94,6 +96,7 @@ class ChatSessionManager:
         tool_definitions: Optional[List[Dict[str, Any]]] = None,
         tool_index: Optional[Dict[str, Dict[str, Any]]] = None,
         server_allowlist: Optional[List[str]] = None,
+        skill_ids: Optional[List[str]] = None,
     ) -> ChatSession:
         session_id = uuid.uuid4().hex
         messages: List[Dict[str, Any]] = []
@@ -108,6 +111,7 @@ class ChatSessionManager:
             tool_definitions=tool_definitions or [],
             tool_index=tool_index or {},
             server_allowlist=list(server_allowlist) if server_allowlist else None,
+            skill_ids=list(skill_ids) if skill_ids else [],
         )
 
         async with self._lock:

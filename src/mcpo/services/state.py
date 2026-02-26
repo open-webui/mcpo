@@ -19,6 +19,7 @@ class StateManager:
         self._model_states = {}  # {model_id: {"enabled": bool}}
         self._skill_states = {}  # {skill_id: {"enabled": bool}}
         self._favorite_models: List[str] = []  # List of starred model IDs
+        self._code_mode: bool = False  # Code mode toggle
         # Use a re-entrant lock because save_state is called from within other
         # lock-protected methods, and a standard Lock would deadlock.
         self._lock = threading.RLock()
@@ -36,12 +37,14 @@ class StateManager:
                         self._model_states = data.get('model_states', {})
                         self._skill_states = data.get('skill_states', {})
                         self._favorite_models = data.get('favorite_models', [])
+                        self._code_mode = data.get('code_mode', False)
                 else:
                     self._server_states = {}
                     self._provider_states = {}
                     self._model_states = {}
                     self._skill_states = {}
                     self._favorite_models = []
+                    self._code_mode = False
             except Exception:
                 # If loading fails, start with empty state
                 self._server_states = {}
@@ -49,6 +52,7 @@ class StateManager:
                 self._model_states = {}
                 self._skill_states = {}
                 self._favorite_models = []
+                self._code_mode = False
             return self._server_states
     
     def save_state(self) -> None:
@@ -61,6 +65,7 @@ class StateManager:
                     "model_states": self._model_states,
                     "skill_states": self._skill_states,
                     "favorite_models": self._favorite_models,
+                    "code_mode": self._code_mode,
                 }
                 dir_path = os.path.dirname(os.path.abspath(self.state_file_path))
                 fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
@@ -68,7 +73,7 @@ class StateManager:
                     with os.fdopen(fd, 'w') as f:
                         json.dump(state_data, f, indent=2)
                     os.replace(tmp_path, self.state_file_path)
-                except:
+                except Exception:
                     os.unlink(tmp_path)
                     raise
             except Exception as e:
@@ -198,6 +203,18 @@ class StateManager:
         """Check if a model is in favorites."""
         with self._lock:
             return model_id in self._favorite_models
+
+    # --- Code Mode ---
+    def is_code_mode_enabled(self) -> bool:
+        """Check if code mode is enabled."""
+        with self._lock:
+            return self._code_mode
+
+    def set_code_mode_enabled(self, enabled: bool) -> None:
+        """Enable or disable code mode."""
+        with self._lock:
+            self._code_mode = bool(enabled)
+            self.save_state()
 
 
 # Global instance for backward compatibility

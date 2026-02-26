@@ -44,30 +44,237 @@
     gap: 8px;
 }
 
-.skills-toolbar {
-    flex-wrap: wrap;
+/* Skills Page — Split-panel layout */
+
+.sk-layout {
+    display: flex;
+    gap: 16px;
+    height: 100%;
+    min-height: 0;
+}
+
+.sk-list-panel {
+    width: 280px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.sk-list-header {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
 }
 
-.skills-select {
-    min-height: 38px;
-    width: 340px;
+.sk-list-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sk-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sk-list-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.sk-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.sk-card:hover {
+    background: var(--hover);
+}
+
+.sk-card.selected {
+    background: var(--active);
+    border-color: var(--accent);
+}
+
+.sk-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.sk-card-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sk-card-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+/* Editor panel */
+
+.sk-editor-panel {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.sk-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+}
+
+.sk-empty-icon {
+    font-size: 32px;
+    opacity: 0.35;
+}
+
+.sk-empty-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sk-empty-text {
+    font-size: 12px;
+    text-align: center;
+    max-width: 340px;
+    line-height: 1.5;
+}
+
+.sk-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.sk-editor-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.sk-editor-toolbar-left { display: flex; align-items: center; gap: 8px; }
+.sk-editor-toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+.sk-editor-mode {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sk-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sk-field-grow {
+    flex: 1;
+    min-height: 0;
+}
+
+.sk-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.sk-label-hint {
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.sk-input {
     padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
 }
 
-.skills-input {
-    min-height: 38px;
-    margin-top: 8px;
+.sk-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
-.skills-description {
-    min-height: 92px;
-    margin-top: 8px;
+.sk-input[readonly] {
+    opacity: 0.6;
+    cursor: default;
 }
 
-.skills-content {
-    min-height: 320px;
-    margin-top: 8px;
+.sk-textarea-sm {
+    min-height: 60px;
+    resize: vertical;
+}
+
+.sk-textarea-lg {
+    flex: 1;
+    min-height: 180px;
+    resize: vertical;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+    .sk-layout {
+        flex-direction: column;
+    }
+
+    .sk-list-panel {
+        width: 100%;
+        max-height: 200px;
+    }
 }
 
 .client-config .client-config-actions {

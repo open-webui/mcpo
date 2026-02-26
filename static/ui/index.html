@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/ui/css/logs.css?v=20250930222949">
     <link rel="stylesheet" href="/ui/css/config.css?v=20250930222949">
     <link rel="stylesheet" href="/ui/css/chat.css?v=20251203">
+    <link rel="stylesheet" href="/ui/css/settings.css?v=20260226">
 </head>
 <body data-theme="light">
     <div class="app">
@@ -40,6 +41,9 @@
                 </div>
                 <div class="nav-item" data-page="config">
                     <span>Configuration</span>
+                </div>
+                <div class="nav-item" data-page="settings">
+                    <span>Settings</span>
                 </div>
                 <div class="nav-item" data-page="about">
                     <span>About</span>
@@ -184,25 +188,54 @@
                 
                 <!-- Skills Page -->
                 <div class="page" id="skills-page">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2 class="card-title">Agent Skills</h2>
-                        </div>
-                        <div class="card-content">
-                            <p class="section-description">Manage markdown skill packs injected into chat and completions requests.</p>
-                            <div class="config-actions skills-toolbar">
-                                <select id="skills-select" class="config-editor skills-select"></select>
-                                <button class="btn" id="skills-refresh-btn" type="button">Refresh</button>
-                                <button class="btn" id="skills-new-btn" type="button">New</button>
-                                <button class="btn" id="skills-toggle-btn" type="button">Enable/Disable</button>
-                                <button class="btn" id="skills-delete-btn" type="button">Delete</button>
+                    <div class="sk-layout">
+                        <!-- Left: Skill List -->
+                        <div class="sk-list-panel">
+                            <div class="sk-list-header">
+                                <span class="sk-list-title">Skills</span>
+                                <button class="btn" id="skills-new-btn" type="button">+ New</button>
                             </div>
-                            <input id="skills-id-input" class="config-editor skills-input" placeholder="skill-id" />
-                            <input id="skills-title-input" class="config-editor skills-input" placeholder="Skill title" />
-                            <textarea id="skills-description-input" class="config-editor skills-description" placeholder="Short description"></textarea>
-                            <textarea id="skills-content-input" class="config-editor skills-content" placeholder="Skill markdown content"></textarea>
-                            <div class="config-actions">
-                                <button class="btn btn-primary" id="skills-save-btn" type="button">Save Skill</button>
+                            <div class="sk-list" id="skills-list">
+                                <!-- Cards rendered by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Right: Editor -->
+                        <div class="sk-editor-panel" id="skills-editor-panel">
+                            <!-- Empty state (shown when nothing selected) -->
+                            <div class="sk-empty" id="skills-empty-state">
+                                <div class="sk-empty-icon">&#9998;</div>
+                                <div class="sk-empty-title">No skill selected</div>
+                                <div class="sk-empty-text">Select a skill from the list or create a new one. Skills are markdown packs injected into chat and completions requests.</div>
+                            </div>
+
+                            <!-- Editor form (hidden until a skill is selected) -->
+                            <div class="sk-editor" id="skills-editor" style="display:none;">
+                                <div class="sk-editor-toolbar">
+                                    <div class="sk-editor-toolbar-left">
+                                        <span class="sk-editor-mode" id="skills-editor-mode">Editing</span>
+                                    </div>
+                                    <div class="sk-editor-toolbar-right">
+                                        <button class="btn btn-danger" id="skills-delete-btn" type="button">Delete</button>
+                                        <button class="btn btn-primary" id="skills-save-btn" type="button">Save</button>
+                                    </div>
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-id-input">ID</label>
+                                    <input id="skills-id-input" class="sk-input" placeholder="my-skill-id" />
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-title-input">Title</label>
+                                    <input id="skills-title-input" class="sk-input" placeholder="Skill display name" />
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-description-input">Description</label>
+                                    <textarea id="skills-description-input" class="sk-input sk-textarea-sm" placeholder="Brief description of what this skill does"></textarea>
+                                </div>
+                                <div class="sk-field-group sk-field-grow">
+                                    <label class="sk-label" for="skills-content-input">Content <span class="sk-label-hint">(Markdown)</span></label>
+                                    <textarea id="skills-content-input" class="sk-input sk-textarea-lg" placeholder="Skill markdown content — this is injected into system prompts"></textarea>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -258,6 +291,96 @@
                     </div>
                 </div>
                 
+                <!-- Settings Page -->
+                <div class="page" id="settings-page">
+                    <div class="settings-layout">
+                        <!-- Code Mode -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Code Mode</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Enable Code Mode</div>
+                                        <div class="settings-row-description">
+                                            Replace all individual MCP tools with two meta-tools: <strong>search_tools</strong> and <strong>execute_tool</strong>.
+                                            This reduces context usage when many servers are configured. The LLM discovers tools via search, then executes them by name.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <div class="toggle" id="settings-code-mode-toggle"></div>
+                                    </div>
+                                </div>
+                                <div class="settings-hint" id="settings-code-mode-hint">
+                                    When enabled, clients see 2 tools instead of all individual tools.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Authentication -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Authentication</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">API Key</div>
+                                        <div class="settings-row-description">
+                                            Set the API key for authenticating requests to this UI. Stored in your browser only.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control settings-row-control-wide">
+                                        <input type="password" id="settings-api-key-input" class="settings-input" placeholder="Enter API key" autocomplete="off" />
+                                        <button class="btn" type="button" id="settings-api-key-reveal">Show</button>
+                                        <button class="btn btn-primary" type="button" id="settings-api-key-save">Save</button>
+                                    </div>
+                                </div>
+                                <div class="settings-hint" id="settings-api-key-hint"></div>
+                            </div>
+                        </div>
+
+                        <!-- Appearance -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Appearance</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Theme</div>
+                                        <div class="settings-row-description">Switch between light and dark mode.</div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <button class="btn" type="button" id="settings-theme-btn">Toggle Theme</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Danger Zone -->
+                        <div class="settings-section settings-section-danger">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Danger Zone</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Clear Local Storage</div>
+                                        <div class="settings-row-description">
+                                            Remove all locally stored preferences (API key, theme, page state, chat history). Does not affect server data.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <button class="btn btn-danger" type="button" id="settings-clear-storage">Clear</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- About Page -->
                 <div class="page" id="about-page"></div>
                 
@@ -274,6 +397,7 @@
     <script src="/ui/js/pages/config.js?v=20250930222949"></script>
     <script src="/ui/js/pages/skills.js?v=20260211"></script>
     <script src="/ui/js/pages/chat.js?v=20250930222949"></script>
+    <script src="/ui/js/pages/settings.js?v=20260226"></script>
     <script src="/ui/js/core/globals.js?v=20250930222949"></script>
     <script src="/ui/js/core/app.js?v=20250930222949"></script>
 

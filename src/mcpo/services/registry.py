@@ -121,7 +121,7 @@ class ServerRegistry:
                 with os.fdopen(fd, 'w') as f:
                     json.dump(self._config_data, f, indent=2)
                 os.replace(tmp_path, config_path)
-            except:
+            except Exception:
                 os.unlink(tmp_path)
                 raise
     

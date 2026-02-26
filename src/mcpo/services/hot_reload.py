@@ -49,8 +49,12 @@ class ConfigFileHandler(FileSystemEventHandler):
                                 lambda: asyncio.create_task(self._safe_reload())
                             )
                         except RuntimeError:
-                            # No event loop, call directly (should be rare)
-                            asyncio.run(self._safe_reload())
+                            # No event loop, run in a new loop for this thread
+                            loop = asyncio.new_event_loop()
+                            try:
+                                loop.run_until_complete(self._safe_reload())
+                            finally:
+                                loop.close()
                     except Exception as e:
                         logger.error(f"Error scheduling config reload: {e}")
     

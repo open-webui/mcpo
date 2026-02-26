@@ -16,7 +16,6 @@ import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Body, Query
 from pydantic import BaseModel
-from typing import Any as _Any
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
 from fastapi.exceptions import RequestValidationError
@@ -35,11 +34,12 @@ from mcpo.utils.main import (
     get_tool_handler,
     normalize_server_type,
 )
-from mcpo.utils.config import interpolate_env_placeholders_in_config
+from mcpo.utils.config import interpolate_env_placeholders_in_config, normalize_config_shape
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.services.state import get_state_manager
 from mcpo.services.logging import get_log_manager
 from mcpo.services.logging_handlers import BufferedLogHandler
+
 from mcpo.api.routers.admin import _mount_or_remount_fastmcp, router as admin_router
 from mcpo.api.routers.chat import router as chat_router
 from mcpo.api.routers.completions import router as completions_router
@@ -141,12 +141,23 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
     else:
         raise ValueError(f"Server '{server_name}' must have either 'command' for stdio or 'type' and 'url' for remote servers")
 
+    # Validate disabledTools
+    disabled_tools = server_cfg.get("disabledTools")
+    if disabled_tools is not None:
+        if not isinstance(disabled_tools, list):
+            raise ValueError(f"Server '{server_name}' 'disabledTools' must be a list")
+        for tool_name in disabled_tools:
+            if not isinstance(tool_name, str):
+                raise ValueError(f"Server '{server_name}' 'disabledTools' must contain only strings")
+
 
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load and validate config from file."""
     try:
         with open(config_path, "r") as f:
             config_data = json.load(f)
+
+        config_data = normalize_config_shape(config_data)
 
         # Expand any ${VAR} placeholders from the current environment before validation
         config_data = interpolate_env_placeholders_in_config(config_data)
@@ -226,6 +237,7 @@ def create_sub_app(server_name: str, server_cfg: Dict[str, Any], cors_allow_orig
 
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
+    sub_app.state.disabled_tools = server_cfg.get("disabledTools", [])
     # Keep a stable config key for operation_id generation and discovery
     sub_app.state.config_key = server_name
 
@@ -251,8 +263,20 @@ def mount_config_servers(main_app: FastAPI, config_data: Dict[str, Any],
 
 def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
     """Unmount specific MCP servers."""
+    active_lifespans = getattr(main_app.state, 'active_lifespans', {})
     for server_name in server_names:
         mount_path = f"{path_prefix}{server_name}"
+
+        # Clean up lifespan context if it exists
+        if server_name in active_lifespans:
+            lifespan_context = active_lifespans[server_name]
+            try:
+                asyncio.create_task(lifespan_context.__aexit__(None, None, None))
+            except Exception as e:
+                logger.warning(f"Error cleaning up lifespan for {server_name}: {e}")
+            finally:
+                del active_lifespans[server_name]
+
         # Find and remove the mount
         routes_to_remove = []
         for route in main_app.router.routes:
@@ -305,6 +329,11 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
 
             if servers_to_add:
                 logger.info(f"Adding servers: {list(servers_to_add)}")
+
+                # Track lifespan contexts for dynamically added sub-apps
+                if not hasattr(main_app.state, 'active_lifespans'):
+                    main_app.state.active_lifespans = {}
+
                 for server_name in servers_to_add:
                     server_cfg = new_config_data["mcpServers"][server_name]
                     try:
@@ -321,10 +350,17 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
                         except Exception as state_err:  # pragma: no cover - defensive
                             logger.warning(f"Failed to persist state for server '{server_name}': {state_err}")
 
-                        # Initialize newly mounted sub-app (establish MCP session + register tool endpoints)
+                        # Start lifespan for newly mounted sub-app and track for cleanup
                         try:
-                            await initialize_sub_app(sub_app)
-                            sub_app.state.last_error = None
+                            lifespan_context = sub_app.router.lifespan_context(sub_app)
+                            await lifespan_context.__aenter__()
+                            main_app.state.active_lifespans[server_name] = lifespan_context
+                            is_connected = getattr(sub_app.state, "is_connected", False)
+                            if is_connected:
+                                logger.info(f"Successfully connected to new server: '{server_name}'")
+                                sub_app.state.last_error = None
+                            else:
+                                logger.warning(f"Failed to connect to new server: '{server_name}'")
                         except Exception as init_err:  # pragma: no cover - defensive
                             sub_app.state.is_connected = False
                             sub_app.state.last_error = str(init_err)
@@ -424,6 +460,17 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
 
     tools_result = await session.list_tools()
     tools = tools_result.tools
+
+    # Filter out disabled tools configured for this server
+    disabled_tools = getattr(app.state, "disabled_tools", [])
+    if disabled_tools:
+        original_count = len(tools)
+        tools = [tool for tool in tools if tool.name not in disabled_tools]
+        filtered_count = original_count - len(tools)
+        if filtered_count > 0:
+            logger.info(
+                f"Filtered out {filtered_count} tool(s) for server '{app.title}': {disabled_tools}"
+            )
 
     # Prefer config key from state to ensure uniqueness across servers
     server_key = getattr(app.state, "config_key", None) or (app.title or "server").replace(" ", "_")
@@ -608,10 +655,10 @@ async def create_internal_mcpo_server(main_app: FastAPI, api_dependency) -> Fast
     )
     # Request models for clear OpenAPI requestBody schemas
     class PostConfigBody(BaseModel):
-        config: _Any
+        config: Any
 
     class PostEnvBody(BaseModel):
-        env_vars: Dict[str, _Any]
+        env_vars: Dict[str, Any]
 
     class PostRequirementsBody(BaseModel):
         content: str

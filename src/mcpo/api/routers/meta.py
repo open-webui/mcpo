@@ -21,6 +21,8 @@ router = APIRouter()
 # Import services for cleaner architecture
 from mcpo.services.state import get_state_manager
 from mcpo.services.logging import get_log_manager
+from mcpo.services.runner import get_runner_service
+from mcpo.services.metrics import get_metrics_aggregator
 
 # Import remaining dependencies from main (to be phased out)
 from mcpo.main import (
@@ -30,6 +32,7 @@ from mcpo.main import (
     unmount_servers,
     create_sub_app,
     error_envelope,
+    MCP_VERSION,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +74,7 @@ async def _proxy_meta_request(
     path: str,
     *,
     method: str = "GET",
-    params: Optional[Dict[str, Any]] | None = None,
+    params: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Forward a log-related request to the MCP proxy if configured."""
     base_url = getattr(request.app.state, "mcp_proxy_url", None)

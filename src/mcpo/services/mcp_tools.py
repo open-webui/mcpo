@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -8,14 +9,25 @@ from starlette.routing import Mount
 
 from mcpo.services.state import get_state_manager
 
+logger = logging.getLogger(__name__)
+
 
 def collect_enabled_mcp_sessions(
     app: FastAPI,
     allowlist: Optional[List[str]] = None,
     connected_only: bool = True,
 ) -> List[Any]:
+    """Collect active MCP ClientSession objects from mounted sub-apps."""
+    return [session for _, session in collect_enabled_mcp_sessions_with_names(app, allowlist, connected_only)]
+
+
+def collect_enabled_mcp_sessions_with_names(
+    app: FastAPI,
+    allowlist: Optional[List[str]] = None,
+    connected_only: bool = True,
+) -> List[Tuple[str, Any]]:
     """
-    Collect active MCP ClientSession objects from mounted sub-apps.
+    Collect (server_name, session) tuples from mounted sub-apps.
 
     - Iterates FastAPI mounts on the main app
     - Skips FastMCP proxy mounts (internal proxies)
@@ -24,10 +36,9 @@ def collect_enabled_mcp_sessions(
     - Optionally requires connected_only sessions
 
     Returns:
-        List of session objects (e.g., mcp.ClientSession) suitable for passing
-        directly to google-genai tools support (experimental MCP integration).
+        List of (server_name, session) tuples.
     """
-    sessions: List[Any] = []
+    out: List[Tuple[str, Any]] = []
     state_manager = get_state_manager()
 
     for route in app.router.routes:
@@ -44,63 +55,23 @@ def collect_enabled_mcp_sessions(
 
         # Identify server name from mount path
         server_name = route.path.strip("/")
-        
+
         # Add logging for skipped servers
         if allowlist is not None and server_name not in allowlist:
-            import logging
-            logging.getLogger(__name__).info(f"MCP session for '{server_name}' skipped: not in allowlist.")
+            logger.info(f"MCP session for '{server_name}' skipped: not in allowlist.")
             continue
 
         # Respect server enabled state from state manager
         if not state_manager.is_server_enabled(server_name):
-            import logging
-            logging.getLogger(__name__).info(f"MCP session for '{server_name}' skipped: server disabled in state manager.")
+            logger.info(f"MCP session for '{server_name}' skipped: server disabled in state manager.")
             continue
 
         # Connected filter (default True)
         if connected_only and not getattr(sub_app.state, "is_connected", False):
-            import logging
-            logging.getLogger(__name__).warning(f"MCP session for '{server_name}' skipped: server not connected.")
+            logger.warning(f"MCP session for '{server_name}' skipped: server not connected.")
             continue
 
         # Grab the MCP session if present
-        session = getattr(sub_app.state, "session", None)
-        if session is not None:
-            sessions.append(session)
-
-    return sessions
-
-
-def collect_enabled_mcp_sessions_with_names(
-    app: FastAPI,
-    allowlist: Optional[List[str]] = None,
-    connected_only: bool = True,
-) -> List[Tuple[str, Any]]:
-    """
-    Variant that returns (server_name, session) tuples for callers that need names.
-    """
-    out: List[Tuple[str, Any]] = []
-    state_manager = get_state_manager()
-
-    for route in app.router.routes:
-        if not isinstance(route, Mount):
-            continue
-        sub_app = getattr(route, "app", None)
-        if sub_app is None or not hasattr(sub_app, "state"):
-            continue
-
-        if getattr(sub_app.state, "is_fastmcp_proxy", False):
-            continue
-
-        server_name = route.path.strip("/")
-        if allowlist is not None and server_name not in allowlist:
-            continue
-
-        if not state_manager.is_server_enabled(server_name):
-            continue
-        if connected_only and not getattr(sub_app.state, "is_connected", False):
-            continue
-
         session = getattr(sub_app.state, "session", None)
         if session is not None:
             out.append((server_name, session))

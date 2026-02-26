@@ -83,6 +83,23 @@
     line-height: 1.4;
 }
 
+.skills-loaded-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin: 8px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary, #f0f4f8);
+    border-left: 3px solid var(--accent, #6366f1);
+    border-radius: 4px;
+}
+
+.skills-loaded-icon {
+    font-size: 14px;
+}
+
 .chat-model-row {
     display: flex;
     align-items: center;
