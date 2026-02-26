@@ -73,7 +73,7 @@ class StateManager:
                     with os.fdopen(fd, 'w') as f:
                         json.dump(state_data, f, indent=2)
                     os.replace(tmp_path, self.state_file_path)
-                except:
+                except Exception:
                     os.unlink(tmp_path)
                     raise
             except Exception as e:

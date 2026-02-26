@@ -16,7 +16,6 @@ import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Body, Query
 from pydantic import BaseModel
-from typing import Any as _Any
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
 from fastapi.exceptions import RequestValidationError
@@ -608,10 +607,10 @@ async def create_internal_mcpo_server(main_app: FastAPI, api_dependency) -> Fast
     )
     # Request models for clear OpenAPI requestBody schemas
     class PostConfigBody(BaseModel):
-        config: _Any
+        config: Any
 
     class PostEnvBody(BaseModel):
-        env_vars: Dict[str, _Any]
+        env_vars: Dict[str, Any]
 
     class PostRequirementsBody(BaseModel):
         content: str

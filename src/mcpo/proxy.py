@@ -13,12 +13,8 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# Prefer vendored FastMCP in workspace if available
-try:
-    from fastmcp.server.server import FastMCP
-    from fastmcp.mcp_config import MCPConfig
-except Exception as e:
-    raise
+from fastmcp.server.server import FastMCP
+from fastmcp.mcp_config import MCPConfig
 
 from mcpo.services.logging import get_log_manager
 from mcpo.services.logging_handlers import BufferedLogHandler

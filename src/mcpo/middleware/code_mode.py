@@ -113,7 +113,7 @@ class CodeModeMCPMiddleware:
                         held_headers = (start_message_held or {}).get(
                             "headers", [(b"content-type", b"application/json")]
                         )
-                        await send({"type": "http.response.start", "status": 200, "headers": held_headers})
+                        await send({"type": "http.response.start", "status": start_message_held.get("status", 200) if start_message_held else 200, "headers": held_headers})
                         await send({"type": "http.response.body", "body": out_body})
                         return
                     except (json.JSONDecodeError, Exception) as e:
@@ -121,7 +121,7 @@ class CodeModeMCPMiddleware:
                         if start_message_held:
                             await send(start_message_held)
                         else:
-                            await send({"type": "http.response.start", "status": 200})
+                            await send({"type": "http.response.start", "status": start_message_held.get("status", 200) if start_message_held else 200})
                         await send({"type": "http.response.body", "body": full_body})
                         return
                 return

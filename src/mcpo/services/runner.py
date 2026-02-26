@@ -4,6 +4,7 @@ Centralizes all tool execution logic with proper error handling and state manage
 """
 
 import asyncio
+import json
 import logging
 import time
 import threading
@@ -111,7 +112,6 @@ class RunnerService:
                 if result.content and isinstance(result.content[0], types.TextContent):
                     error_message = result.content[0].text
                     try:
-                        import json
                         error_data = json.loads(error_message)
                     except (json.JSONDecodeError, TypeError):
                         pass

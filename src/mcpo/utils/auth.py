@@ -94,22 +94,3 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except Exception as e:
             return JSONResponse(status_code=500, content={"detail": str(e)})
-
-
-# def create_token(data: dict, expires_delta: Union[timedelta, None] = None) -> str:
-#     payload = data.copy()
-
-#     if expires_delta:
-#         expire = datetime.now(UTC) + expires_delta
-#         payload.update({"exp": expire})
-
-#     encoded_jwt = jwt.encode(payload, SESSION_SECRET, algorithm=ALGORITHM)
-#     return encoded_jwt
-
-
-# def decode_token(token: str) -> Optional[dict]:
-#     try:
-#         decoded = jwt.decode(token, SESSION_SECRET, algorithms=[ALGORITHM])
-#         return decoded
-#     except Exception:
-#         return None
