@@ -34,7 +34,7 @@ from mcpo.utils.main import (
     get_tool_handler,
     normalize_server_type,
 )
-from mcpo.utils.config import interpolate_env_placeholders_in_config
+from mcpo.utils.config import interpolate_env_placeholders_in_config, normalize_config_shape
 from mcpo.utils.config_watcher import ConfigWatcher
 from mcpo.services.state import get_state_manager
 from mcpo.services.logging import get_log_manager
@@ -156,6 +156,8 @@ def load_config(config_path: str) -> Dict[str, Any]:
     try:
         with open(config_path, "r") as f:
             config_data = json.load(f)
+
+        config_data = normalize_config_shape(config_data)
 
         # Expand any ${VAR} placeholders from the current environment before validation
         config_data = interpolate_env_placeholders_in_config(config_data)

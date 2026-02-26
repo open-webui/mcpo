@@ -13,7 +13,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastmcp.server.server import FastMCP
+from fastmcp.server import create_proxy
 from fastmcp.mcp_config import MCPConfig
 
 from mcpo.services.logging import get_log_manager
@@ -21,6 +21,7 @@ from mcpo.services.logging_handlers import BufferedLogHandler
 from mcpo.services.state import get_state_manager
 from mcpo.middleware.mcp_tool_filter import MCPToolFilterMiddleware
 from mcpo.middleware.code_mode import CodeModeMCPMiddleware
+from mcpo.utils.config import normalize_config_shape
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8001
@@ -216,6 +217,7 @@ async def run_proxy(
 
     with config_path.open("r", encoding="utf-8") as f:
         raw_cfg = json.load(f)
+    raw_cfg = normalize_config_shape(raw_cfg)
     raw_cfg = _interpolate_env_placeholders(raw_cfg)
 
     state_manager = get_state_manager()
@@ -238,7 +240,7 @@ async def run_proxy(
         logger.warning("All MCP servers are disabled; FastMCP proxy will expose only metadata endpoints")
 
     cfg = MCPConfig.from_dict(raw_cfg)
-    proxy = FastMCP.as_proxy(cfg)
+    proxy = create_proxy(cfg)
 
     # Prepare shared list for FastMCP sub-apps (populated during mount loop)
     fastmcp_apps: list[tuple[FastAPI, str]] = []
@@ -352,7 +354,7 @@ async def run_proxy(
         single_cfg_dict = {"mcpServers": {server_name: server_cfg}}
         try:
             single_cfg = MCPConfig.from_dict(single_cfg_dict)
-            single_proxy = FastMCP.as_proxy(single_cfg)
+            single_proxy = create_proxy(single_cfg)
         except Exception as exc:
             logger.error(
                 "Failed to initialize FastMCP proxy for server '%s': %s",
