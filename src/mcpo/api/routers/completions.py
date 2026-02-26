@@ -12,6 +12,8 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from mcpo.services.skills import compile_skills_system_prompt
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["completions"])
@@ -61,6 +63,9 @@ class CompletionRequest(BaseModel):
     # Extra body passthrough for provider-specific switches (e.g., reasoning_split)
     extra_body: Optional[Dict[str, Any]] = Field(
         None, description="Additional provider-specific payload fields"
+    )
+    skill_ids: Optional[List[str]] = Field(
+        None, description="Skill IDs to inject as system prompt instructions"
     )
 
     @field_validator("stop")
@@ -976,7 +981,24 @@ async def chat_completions(payload: CompletionRequest):
         for i, msg in enumerate(payload.messages[-3:]):  # Log last 3 messages
             content_preview = str(msg.content)[:100] if msg.content else "(empty)"
             logger.debug(f"[COMPLETIONS] Message[-{len(payload.messages)-i}]: role={msg.role}, content={content_preview}")
-    
+
+    # Inject skills into the messages as a system prompt
+    skills_prompt = compile_skills_system_prompt(
+        scope="completions",
+        model=payload.model,
+        provider=payload.provider,
+        requested_skill_ids=payload.skill_ids if payload.skill_ids else None,
+    )
+    if skills_prompt:
+        # Prepend or merge into existing system message
+        has_system = payload.messages and payload.messages[0].role == "system"
+        if has_system:
+            existing = payload.messages[0].content or ""
+            payload.messages[0].content = f"{existing}\n\n{skills_prompt}" if existing else skills_prompt
+        else:
+            payload.messages.insert(0, ChatMessage(role="system", content=skills_prompt))
+        logger.info(f"[COMPLETIONS] Injected skills system prompt ({len(skills_prompt)} chars)")
+
     try:
         provider = _resolve_provider(payload)
         logger.info(f"[COMPLETIONS] Resolved provider: {provider.name}")

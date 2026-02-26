@@ -276,6 +276,7 @@ async def list_agent_skills():
                 "id": item.id,
                 "title": item.title,
                 "description": item.description,
+                "content": item.content,
                 "enabled": item.enabled,
                 "priority": item.priority,
                 "scopes": item.scopes or [],
