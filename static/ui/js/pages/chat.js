@@ -691,6 +691,9 @@ async function handleStreamEvent(event) {
             chatState.session = event.session;
             renderSession();
             break;
+        case 'skills.loaded':
+            displaySkillsLoaded(event.skills || []);
+            break;
         case 'step.started':
             appendStepMessage(event.step);
             break;
@@ -724,6 +727,18 @@ async function handleStreamEvent(event) {
         default:
             break;
     }
+}
+
+function displaySkillsLoaded(skills) {
+    if (!skills.length) return;
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    const names = skills.map((s) => s.title || s.id).join(', ');
+    const el = document.createElement('div');
+    el.className = 'skills-loaded-indicator';
+    el.innerHTML = `<span class="skills-loaded-icon">&#9889;</span> Skills loaded: <strong>${escapeHtml(names)}</strong>`;
+    container.appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 function appendUserMessage(content) {

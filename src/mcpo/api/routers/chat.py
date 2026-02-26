@@ -23,6 +23,7 @@ from mcpo.services.mcp_tools import (
     sanitize_tool_name,
 )
 from mcpo.services.runner import get_runner_service
+from mcpo.services.skills import compile_skills_system_prompt, select_skills
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,9 @@ class CreateSessionRequest(BaseModel):
     server_allowlist: Optional[List[str]] = Field(
         None, description="Restrict available MCP servers to this allowlist"
     )
+    skill_ids: Optional[List[str]] = Field(
+        None, description="Skill IDs to activate for this session"
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -271,6 +275,9 @@ class ChatMessageRequest(BaseModel):
     model: Optional[str] = Field(None, description="Override the session model")
     include_reasoning: Optional[bool] = Field(True, description="Request provider reasoning tokens when supported")
     reasoning_effort: Optional[str] = Field(None, description="Provider-specific reasoning effort hint (e.g., low/medium/high)")
+    skill_ids: Optional[List[str]] = Field(
+        None, description="Skill IDs to inject for this message"
+    )
 
 
 class ResetSessionResponse(BaseModel):
@@ -490,12 +497,26 @@ async def create_session(
         ids = {entry["id"] for entry in available_models}
         if payload.model not in ids:
             available_models.insert(0, {"id": payload.model, "label": _format_model_label(payload.model)})
+
+    # Compile skills into the system prompt
+    system_prompt = payload.system_prompt
+    skill_ids = payload.skill_ids or []
+    skills_prompt = compile_skills_system_prompt(
+        scope="chat",
+        model=payload.model,
+        provider=None,
+        requested_skill_ids=skill_ids if skill_ids else None,
+    )
+    if skills_prompt:
+        system_prompt = f"{system_prompt}\n\n{skills_prompt}" if system_prompt else skills_prompt
+
     session = await manager.create_session(
         model=payload.model,
-        system_prompt=payload.system_prompt,
+        system_prompt=system_prompt or None,
         tool_definitions=tool_defs,
         tool_index=tool_index,
         server_allowlist=payload.server_allowlist,
+        skill_ids=skill_ids,
     )
     return CreateSessionResponse(session=session.to_dict())
 
@@ -615,6 +636,26 @@ async def _stream_exchange(
         yield chunk
 
 
+def _inject_skills_system_message(session: ChatSession, skills_prompt: str) -> None:
+    """Insert or update a skills system message at the start of the conversation.
+
+    If the session already has a system message containing skills, update it.
+    Otherwise prepend a new system message with the skills prompt.
+    """
+    skills_marker = "Agent Skills (system-managed instructions):"
+    for i, msg in enumerate(session.messages):
+        if msg.get("role") == "system" and skills_marker in (msg.get("content") or ""):
+            session.messages[i]["content"] = msg["content"].split(skills_marker)[0].rstrip() + "\n\n" + skills_prompt
+            return
+    # No existing skills system message — check if there's any system message to append to
+    for i, msg in enumerate(session.messages):
+        if msg.get("role") == "system":
+            session.messages[i]["content"] = msg["content"] + "\n\n" + skills_prompt
+            return
+    # No system message at all — insert one
+    session.messages.insert(0, {"role": "system", "content": skills_prompt})
+
+
 async def _perform_exchange(
     session: ChatSession,
     client: ChatClient,
@@ -624,6 +665,35 @@ async def _perform_exchange(
     tool_timeout_max: Optional[float],
     emitter: Optional[Any],
 ) -> Dict[str, Any]:
+    # Inject skills into the conversation if skill_ids are provided on this message
+    request_skill_ids = payload.skill_ids or session.skill_ids or []
+    if request_skill_ids:
+        session.skill_ids = list(request_skill_ids)
+    loaded_skills = select_skills(
+        scope="chat",
+        model=session.model,
+        provider=None,
+        requested_skill_ids=request_skill_ids if request_skill_ids else None,
+    )
+    if loaded_skills:
+        skills_prompt = compile_skills_system_prompt(
+            scope="chat",
+            model=session.model,
+            provider=None,
+            requested_skill_ids=request_skill_ids if request_skill_ids else None,
+        )
+        # Update the system message in the session if skills content changed
+        if skills_prompt:
+            _inject_skills_system_message(session, skills_prompt)
+        if emitter:
+            await emitter(
+                "skills.loaded",
+                skills=[
+                    {"id": s.id, "title": s.title}
+                    for s in loaded_skills
+                ],
+            )
+
     user_message = {"role": "user", "content": payload.message}
     session.messages.append(user_message)
     if emitter:
