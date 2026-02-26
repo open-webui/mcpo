@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Optional, Dict, Any, List
 from urllib.parse import urljoin
@@ -1895,24 +1896,31 @@ async def build_main_app(
     mcpo_app = await create_internal_mcpo_server(main_app, api_dependency)
     main_app.mount("/mcpo", mcpo_app, name="mcpo")
 
+    project_root = Path(__file__).resolve().parents[2]
+    static_ui_dir = project_root / "static" / "ui"
+    mcp_settings_dist_dir = project_root / "mcp-server-settings" / "dist"
+    mcp_settings_dir = project_root / "mcp-server-settings"
+
     # Mount static UI if available (served at /ui)
     try:
-        main_app.mount("/ui", StaticFiles(directory="static/ui", html=True), name="ui")
+        if static_ui_dir.is_dir():
+            main_app.mount("/ui", StaticFiles(directory=str(static_ui_dir), html=True), name="ui")
+        else:
+            logger.warning("UI directory not found at %s; /ui will not be mounted", static_ui_dir)
     except Exception:
-        # Ignore if directory missing; keeps zero-config behavior
-        pass
+        logger.warning("Failed mounting /ui static files", exc_info=True)
     # Provide primary access path /mcp; prefer settings app if present
     try:
         # If a built dist exists (e.g., Vite), serve that, else raw source folder with index.html
-        if os.path.isdir("mcp-server-settings/dist"):
-            main_app.mount("/mcp", StaticFiles(directory="mcp-server-settings/dist", html=True), name="mcp")
-        elif os.path.isfile("mcp-server-settings/index.html"):
-            main_app.mount("/mcp", StaticFiles(directory="mcp-server-settings", html=True), name="mcp")
+        if mcp_settings_dist_dir.is_dir():
+            main_app.mount("/mcp", StaticFiles(directory=str(mcp_settings_dist_dir), html=True), name="mcp")
+        elif (mcp_settings_dir / "index.html").is_file():
+            main_app.mount("/mcp", StaticFiles(directory=str(mcp_settings_dir), html=True), name="mcp")
         else:
             # Fallback to minimal UI
-            main_app.mount("/mcp", StaticFiles(directory="static/ui", html=True), name="mcp")
+            main_app.mount("/mcp", StaticFiles(directory=str(static_ui_dir), html=True), name="mcp")
     except Exception:
-        pass
+        logger.warning("Failed mounting /mcp static files", exc_info=True)
 
     headers = kwargs.get("headers")
     if headers and isinstance(headers, str):
