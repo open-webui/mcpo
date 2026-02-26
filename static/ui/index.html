@@ -188,25 +188,54 @@
                 
                 <!-- Skills Page -->
                 <div class="page" id="skills-page">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2 class="card-title">Agent Skills</h2>
-                        </div>
-                        <div class="card-content">
-                            <p class="section-description">Manage markdown skill packs injected into chat and completions requests.</p>
-                            <div class="config-actions skills-toolbar">
-                                <select id="skills-select" class="config-editor skills-select"></select>
-                                <button class="btn" id="skills-refresh-btn" type="button">Refresh</button>
-                                <button class="btn" id="skills-new-btn" type="button">New</button>
-                                <button class="btn" id="skills-toggle-btn" type="button">Enable/Disable</button>
-                                <button class="btn" id="skills-delete-btn" type="button">Delete</button>
+                    <div class="sk-layout">
+                        <!-- Left: Skill List -->
+                        <div class="sk-list-panel">
+                            <div class="sk-list-header">
+                                <span class="sk-list-title">Skills</span>
+                                <button class="btn" id="skills-new-btn" type="button">+ New</button>
                             </div>
-                            <input id="skills-id-input" class="config-editor skills-input" placeholder="skill-id" />
-                            <input id="skills-title-input" class="config-editor skills-input" placeholder="Skill title" />
-                            <textarea id="skills-description-input" class="config-editor skills-description" placeholder="Short description"></textarea>
-                            <textarea id="skills-content-input" class="config-editor skills-content" placeholder="Skill markdown content"></textarea>
-                            <div class="config-actions">
-                                <button class="btn btn-primary" id="skills-save-btn" type="button">Save Skill</button>
+                            <div class="sk-list" id="skills-list">
+                                <!-- Cards rendered by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Right: Editor -->
+                        <div class="sk-editor-panel" id="skills-editor-panel">
+                            <!-- Empty state (shown when nothing selected) -->
+                            <div class="sk-empty" id="skills-empty-state">
+                                <div class="sk-empty-icon">&#9998;</div>
+                                <div class="sk-empty-title">No skill selected</div>
+                                <div class="sk-empty-text">Select a skill from the list or create a new one. Skills are markdown packs injected into chat and completions requests.</div>
+                            </div>
+
+                            <!-- Editor form (hidden until a skill is selected) -->
+                            <div class="sk-editor" id="skills-editor" style="display:none;">
+                                <div class="sk-editor-toolbar">
+                                    <div class="sk-editor-toolbar-left">
+                                        <span class="sk-editor-mode" id="skills-editor-mode">Editing</span>
+                                    </div>
+                                    <div class="sk-editor-toolbar-right">
+                                        <button class="btn btn-danger" id="skills-delete-btn" type="button">Delete</button>
+                                        <button class="btn btn-primary" id="skills-save-btn" type="button">Save</button>
+                                    </div>
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-id-input">ID</label>
+                                    <input id="skills-id-input" class="sk-input" placeholder="my-skill-id" />
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-title-input">Title</label>
+                                    <input id="skills-title-input" class="sk-input" placeholder="Skill display name" />
+                                </div>
+                                <div class="sk-field-group">
+                                    <label class="sk-label" for="skills-description-input">Description</label>
+                                    <textarea id="skills-description-input" class="sk-input sk-textarea-sm" placeholder="Brief description of what this skill does"></textarea>
+                                </div>
+                                <div class="sk-field-group sk-field-grow">
+                                    <label class="sk-label" for="skills-content-input">Content <span class="sk-label-hint">(Markdown)</span></label>
+                                    <textarea id="skills-content-input" class="sk-input sk-textarea-lg" placeholder="Skill markdown content — this is injected into system prompts"></textarea>
+                                </div>
                             </div>
                         </div>
                     </div>
