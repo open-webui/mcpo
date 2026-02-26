@@ -24,6 +24,7 @@ from mcpo.services.logging import get_log_manager
 from mcpo.services.logging_handlers import BufferedLogHandler
 from mcpo.services.state import get_state_manager
 from mcpo.middleware.mcp_tool_filter import MCPToolFilterMiddleware
+from mcpo.middleware.code_mode import CodeModeMCPMiddleware
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8001
@@ -302,11 +303,15 @@ async def run_proxy(
     global_mount_path = global_mount_path.rstrip("/") or "/"
 
     global_app = proxy.http_app(path="/", transport="streamable-http", stateless_http=stateless_http)
-    
+
     # Add tool filtering middleware for aggregate proxy
     # Pass None as server_name to enable multi-server filtering
     global_app.add_middleware(MCPToolFilterMiddleware, server_name=None)
     logger.info(f"Added tool filtering middleware for aggregate proxy covering {len(filtered_servers)} servers")
+
+    # Add code mode middleware (wraps tool filter; active only when code mode is on)
+    global_app.add_middleware(CodeModeMCPMiddleware, server_name=None)
+    logger.info("Added code mode middleware for aggregate proxy")
     
     fastmcp_apps.append((global_app, f'global mount {global_mount_path}'))
     setattr(global_app.state, "is_fastmcp_proxy", True)
@@ -362,10 +367,14 @@ async def run_proxy(
             continue
 
         sub_app = single_proxy.http_app(path="/", transport="streamable-http", stateless_http=stateless_http)
-        
+
         # Wrap with tool filtering middleware to respect mcpo_state.json
         sub_app.add_middleware(MCPToolFilterMiddleware, server_name=server_name)
         logger.info(f"Added tool filtering middleware for server '{server_name}'")
+
+        # Add code mode middleware for per-server proxy
+        sub_app.add_middleware(CodeModeMCPMiddleware, server_name=server_name)
+        logger.info(f"Added code mode middleware for server '{server_name}'")
 
         # Provide a single mount point for server-specific proxies at /{server}
         root_mount_path = f"/{mount_segment}".replace("//", "/").rstrip("/") or "/"

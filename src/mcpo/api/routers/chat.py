@@ -366,6 +366,9 @@ async def _gather_tool_catalog(
 
     sessions = collect_enabled_mcp_sessions_with_names(app.app, allowlist=allowlist)
     used_names: Dict[str, int] = {}
+
+    # Collect all tools from MCP sessions
+    tools_by_server: Dict[str, List[Dict[str, Any]]] = {}
     for server_name, session in sessions:
         try:
             result = await session.list_tools()
@@ -405,6 +408,52 @@ async def _gather_tool_catalog(
                 "originalName": original_name,
             }
 
+            # Track for code mode catalog
+            tools_by_server.setdefault(server_name, []).append({
+                "name": tool.name,
+                "description": description,
+                "inputSchema": tool_schema,
+            })
+
+    # Check if code mode is active
+    from mcpo.services.state import get_state_manager as _get_sm
+    state_mgr = _get_sm()
+    if state_mgr.is_code_mode_enabled():
+        # Replace all individual tools with the two code mode meta-tools
+        from mcpo.services.code_mode import (
+            build_catalog,
+            get_code_mode_tool_definitions,
+        )
+        code_catalog = build_catalog(tools_by_server)
+
+        # Keep the original tool_index for execute_tool routing
+        original_tool_index = dict(tool_index)
+
+        tool_defs = []
+        tool_index = {}
+
+        for meta_tool in get_code_mode_tool_definitions():
+            tool_defs.append({
+                "type": "function",
+                "function": {
+                    "name": meta_tool["name"],
+                    "description": meta_tool["description"],
+                    "parameters": meta_tool["inputSchema"],
+                },
+            })
+            tool_index[meta_tool["name"]] = {
+                "server": "__code_mode__",
+                "is_code_mode_tool": True,
+                "code_catalog": code_catalog,
+                "original_tool_index": original_tool_index,
+            }
+
+        logger.info(
+            "Code mode: replaced %d tools with 2 meta-tools (search_tools, execute_tool)",
+            len(original_tool_index),
+        )
+        return tool_defs, tool_index
+
     # Add MCPO management tools
     mcpo_tools = _extract_mcpo_tools(app.app)
     for function_name, tool_info in mcpo_tools:
@@ -412,7 +461,7 @@ async def _gather_tool_catalog(
         if function_name in tool_index:
             logger.warning(f"MCPO tool name collision: {function_name}")
             continue
-        
+
         tool_defs.append({
             "type": "function",
             "function": {
@@ -421,7 +470,7 @@ async def _gather_tool_catalog(
                 "parameters": tool_info["parameters"],
             },
         })
-        
+
         tool_index[function_name] = {
             "server": "mcpo",
             "is_mcpo_tool": True,
@@ -430,7 +479,7 @@ async def _gather_tool_catalog(
             "originalName": function_name,
             "main_app": app.app,  # Store reference for ASGI transport
         }
-    
+
     logger.info(f"Tool catalog: {len(tool_defs)} tools ({len(mcpo_tools)} MCPO management tools)")
 
     return tool_defs, tool_index
@@ -1135,6 +1184,113 @@ async def _execute_mcpo_tool(
             }
 
 
+async def _execute_code_mode_tool(
+    session: ChatSession,
+    runner,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    mapping: Dict[str, Any],
+    tool_timeout: Optional[float],
+    tool_timeout_max: Optional[float],
+) -> Dict[str, Any]:
+    """Handle search_tools and execute_tool meta-tool calls for code mode."""
+    from mcpo.services.code_mode import search_catalog
+
+    code_catalog = mapping.get("code_catalog", [])
+    original_tool_index = mapping.get("original_tool_index", {})
+
+    if tool_name == "search_tools":
+        query = arguments.get("query", "")
+        limit = arguments.get("limit", 10)
+        results = search_catalog(code_catalog, query, limit=limit)
+        return {
+            "ok": True,
+            "output": {"tools": results, "total_available": len(code_catalog)},
+            "server": "__code_mode__",
+            "tool": "search_tools",
+        }
+
+    if tool_name == "execute_tool":
+        qualified_name = arguments.get("tool", "")
+        tool_args = arguments.get("arguments", {})
+
+        if not qualified_name:
+            return {
+                "ok": False,
+                "error": "Missing 'tool' parameter — use search_tools first to find tools",
+                "server": "__code_mode__",
+                "tool": "execute_tool",
+            }
+
+        # Find the tool in the original index by matching qualified name
+        # The original index uses sanitized names (e.g. "server-web_search")
+        target_mapping = None
+        for idx_name, idx_mapping in original_tool_index.items():
+            original = idx_mapping.get("originalName", "")
+            if original == qualified_name or idx_name == sanitize_tool_name(qualified_name):
+                target_mapping = idx_mapping
+                break
+
+        if not target_mapping:
+            # Try fuzzy match: search catalog for suggestions
+            results = search_catalog(code_catalog, qualified_name, limit=3)
+            suggestion_text = ""
+            if results:
+                suggestion_text = "\nDid you mean:\n" + "\n".join(
+                    f"  - {r['tool']}: {r['description'][:80]}" for r in results
+                )
+            return {
+                "ok": False,
+                "error": f"Tool '{qualified_name}' not found.{suggestion_text}",
+                "server": "__code_mode__",
+                "tool": "execute_tool",
+            }
+
+        # Execute the actual tool via the runner
+        try:
+            mcp_session = target_mapping["session"]
+            mcp_tool = target_mapping["tool"]
+            logger.info(
+                "[CODE_MODE] Routing execute_tool(%s) → server=%s tool=%s",
+                qualified_name, target_mapping["server"], mcp_tool.name,
+            )
+            result = await runner.execute_tool(
+                mcp_session,
+                mcp_tool.name,
+                tool_args,
+                timeout=tool_timeout,
+                max_timeout=tool_timeout_max,
+            )
+            return {
+                "ok": True,
+                "output": result,
+                "server": target_mapping["server"],
+                "tool": mcp_tool.name,
+            }
+        except HTTPException as e:
+            error_detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+            return {
+                "ok": False,
+                "error": error_detail,
+                "server": target_mapping.get("server", "unknown"),
+                "tool": qualified_name,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": f"{type(e).__name__}: {str(e)}",
+                "server": target_mapping.get("server", "unknown"),
+                "tool": qualified_name,
+            }
+
+    return {
+        "ok": False,
+        "error": f"Unknown code mode tool: {tool_name}",
+        "server": "__code_mode__",
+        "tool": tool_name,
+    }
+
+
 async def _execute_tool(
     session: ChatSession,
     runner,
@@ -1182,6 +1338,14 @@ async def _execute_tool(
     else:
         arguments = {}
         logger.warning(f"[TOOL] Unknown arguments type, defaulting to empty dict")
+
+    # Check if this is a code mode meta-tool
+    if mapping.get("is_code_mode_tool"):
+        logger.info(f"[TOOL] Executing code mode tool: {tool_name}")
+        return await _execute_code_mode_tool(
+            session, runner, tool_name, arguments, mapping,
+            tool_timeout, tool_timeout_max,
+        )
 
     # Check if this is an MCPO management tool (HTTP-based) vs MCP tool (session-based)
     if mapping.get("is_mcpo_tool"):

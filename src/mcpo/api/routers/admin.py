@@ -121,8 +121,11 @@ def _mount_or_remount_fastmcp(main_app: FastAPI, base_path: str = "/mcp") -> Non
         proxy_mounts: list[dict[str, Any]] = []
         used_paths: set[str] = set()
 
+        from mcpo.middleware.code_mode import CodeModeMCPMiddleware
+
         # Aggregate (global) proxy mount
         global_app = proxy.http_app(path="/", transport="streamable-http", stateless_http=None)
+        global_app.add_middleware(CodeModeMCPMiddleware, server_name=None)
         setattr(global_app.state, "is_fastmcp_proxy", True)
         setattr(global_app.state, "proxy_scope", "global")
         setattr(global_app.state, "proxy_mount_base", base_path)
@@ -163,6 +166,7 @@ def _mount_or_remount_fastmcp(main_app: FastAPI, base_path: str = "/mcp") -> Non
                 continue
 
             sub_app = single_proxy.http_app(path="/", transport="streamable-http", stateless_http=None)
+            sub_app.add_middleware(CodeModeMCPMiddleware, server_name=server_name)
             setattr(sub_app.state, "is_fastmcp_proxy", True)
             setattr(sub_app.state, "proxy_scope", "server")
             setattr(sub_app.state, "proxy_server_name", server_name)
@@ -399,3 +403,29 @@ async def preview_skill_prompt(payload: Dict[str, Any]):
         requested_skill_ids=skill_ids if isinstance(skill_ids, list) else None,
     )
     return {"ok": True, "prompt": prompt}
+
+
+# --- Code Mode ---
+
+@router.get("/code-mode")
+async def get_code_mode():
+    """Get current code mode state."""
+    state = get_state_manager()
+    return {"ok": True, "enabled": state.is_code_mode_enabled()}
+
+
+class CodeModeRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable code mode")
+
+
+@router.post("/code-mode")
+async def set_code_mode(payload: CodeModeRequest):
+    """Enable or disable code mode.
+
+    When enabled, the MCP proxy exposes only two meta-tools (search_tools and
+    execute_tool) instead of all individual tools. This reduces context usage
+    for LLMs while still allowing access to the full tool catalog via search.
+    """
+    state = get_state_manager()
+    state.set_code_mode_enabled(payload.enabled)
+    return {"ok": True, "enabled": state.is_code_mode_enabled()}
