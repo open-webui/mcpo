@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/ui/css/logs.css?v=20250930222949">
     <link rel="stylesheet" href="/ui/css/config.css?v=20250930222949">
     <link rel="stylesheet" href="/ui/css/chat.css?v=20251203">
+    <link rel="stylesheet" href="/ui/css/settings.css?v=20260226">
 </head>
 <body data-theme="light">
     <div class="app">
@@ -40,6 +41,9 @@
                 </div>
                 <div class="nav-item" data-page="config">
                     <span>Configuration</span>
+                </div>
+                <div class="nav-item" data-page="settings">
+                    <span>Settings</span>
                 </div>
                 <div class="nav-item" data-page="about">
                     <span>About</span>
@@ -258,6 +262,96 @@
                     </div>
                 </div>
                 
+                <!-- Settings Page -->
+                <div class="page" id="settings-page">
+                    <div class="settings-layout">
+                        <!-- Code Mode -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Code Mode</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Enable Code Mode</div>
+                                        <div class="settings-row-description">
+                                            Replace all individual MCP tools with two meta-tools: <strong>search_tools</strong> and <strong>execute_tool</strong>.
+                                            This reduces context usage when many servers are configured. The LLM discovers tools via search, then executes them by name.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <div class="toggle" id="settings-code-mode-toggle"></div>
+                                    </div>
+                                </div>
+                                <div class="settings-hint" id="settings-code-mode-hint">
+                                    When enabled, clients see 2 tools instead of all individual tools.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Authentication -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Authentication</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">API Key</div>
+                                        <div class="settings-row-description">
+                                            Set the API key for authenticating requests to this UI. Stored in your browser only.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control settings-row-control-wide">
+                                        <input type="password" id="settings-api-key-input" class="settings-input" placeholder="Enter API key" autocomplete="off" />
+                                        <button class="btn" type="button" id="settings-api-key-reveal">Show</button>
+                                        <button class="btn btn-primary" type="button" id="settings-api-key-save">Save</button>
+                                    </div>
+                                </div>
+                                <div class="settings-hint" id="settings-api-key-hint"></div>
+                            </div>
+                        </div>
+
+                        <!-- Appearance -->
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Appearance</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Theme</div>
+                                        <div class="settings-row-description">Switch between light and dark mode.</div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <button class="btn" type="button" id="settings-theme-btn">Toggle Theme</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Danger Zone -->
+                        <div class="settings-section settings-section-danger">
+                            <div class="settings-section-header">
+                                <h2 class="settings-section-title">Danger Zone</h2>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="settings-row">
+                                    <div class="settings-row-info">
+                                        <div class="settings-row-label">Clear Local Storage</div>
+                                        <div class="settings-row-description">
+                                            Remove all locally stored preferences (API key, theme, page state, chat history). Does not affect server data.
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-control">
+                                        <button class="btn btn-danger" type="button" id="settings-clear-storage">Clear</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- About Page -->
                 <div class="page" id="about-page"></div>
                 
@@ -274,6 +368,7 @@
     <script src="/ui/js/pages/config.js?v=20250930222949"></script>
     <script src="/ui/js/pages/skills.js?v=20260211"></script>
     <script src="/ui/js/pages/chat.js?v=20250930222949"></script>
+    <script src="/ui/js/pages/settings.js?v=20260226"></script>
     <script src="/ui/js/core/globals.js?v=20250930222949"></script>
     <script src="/ui/js/core/app.js?v=20250930222949"></script>
 

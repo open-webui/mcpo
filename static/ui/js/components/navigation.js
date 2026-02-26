@@ -7,6 +7,7 @@ const PAGE_HEADERS = {
     'skills-page': { title: 'Skills', subtitle: 'Create, enable, and maintain agent skills' },
     'logs-page': { title: 'Logs', subtitle: 'Server activity and debug information' },
     'config-page': { title: 'Configuration', subtitle: 'Server settings and client config export' },
+    'settings-page': { title: 'Settings', subtitle: 'Code mode, authentication, and preferences' },
     'about-page': { title: 'About', subtitle: 'Information about OpenHubUI' }
 };
 
@@ -70,6 +71,9 @@ function showPage(pageId) {
         }
         if (targetId === 'skills-page' && typeof window.initSkillsPage === 'function') {
             window.initSkillsPage();
+        }
+        if (targetId === 'settings-page' && typeof window.initSettingsPage === 'function') {
+            window.initSettingsPage();
         }
     } catch (e) {
         console.warn('[NAV] Page initializer error:', e);
