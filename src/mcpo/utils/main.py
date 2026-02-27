@@ -1,5 +1,6 @@
 import logging
 import json
+import copy
 import traceback
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
 
@@ -275,6 +276,37 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
 
     return model_fields
 
+def mask_sensitive_headers(args: dict) -> dict:
+    """Masks sensitive header values in logs."""
+    masked = copy.deepcopy(args)
+
+    if "headers" in masked and isinstance(masked["headers"], dict):
+        headers = masked["headers"]
+        sensitive_keys = {
+            "authorization",
+            "token",
+            "api-key",
+            "x-api-key",
+            "x-auth-token",
+            "x-authorization",
+        }
+
+        for key in headers:
+            if key.lower() in sensitive_keys:
+                value = headers[key]
+                if isinstance(value, str):
+                    if value.lower().startswith("bearer "):
+                        headers[key] = "Bearer *****"
+                    elif value.lower().startswith("basic "):
+                        headers[key] = "Basic *****"
+                    elif value.lower().startswith("api-key "):
+                        headers[key] = "API-Key *****"
+                    else:
+                        headers[key] = "*****"
+            elif isinstance(headers[key], dict):
+                headers[key] = mask_sensitive_headers({"value": headers[key]})["value"]
+
+    return masked
 
 def get_tool_handler(
     endpoint_name,
@@ -336,20 +368,20 @@ def get_tool_handler(
 
             forwarded_headers = {}
             if (
-                client_header_forwarding_config
+                client_header_forwarding_config 
                 and client_header_forwarding_config.get("enabled", False)
             ):
                 forwarded_headers = process_headers_for_server(
                     request, client_header_forwarding_config
                 )
 
-            meta = {}
             if forwarded_headers:
-                meta["headers"] = forwarded_headers
-
-            logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
+                args["headers"] = forwarded_headers
+            masked_args = mask_sensitive_headers(args)                
+            logger.info(f"Calling endpoint: {endpoint_name}, with args: {masked_args}")
             try:
                 result = await call_tool_with_reconnect(request, args)
+                logger.info(f"{result}")
 
                 if result.isError:
                     error_message = "Unknown tool execution error"
@@ -396,16 +428,16 @@ def get_tool_handler(
     async def tool(request: Request):
         forwarded_headers = {}
         if (
-            client_header_forwarding_config
+            client_header_forwarding_config 
             and client_header_forwarding_config.get("enabled", False)
         ):
             forwarded_headers = process_headers_for_server(
                 request, client_header_forwarding_config
             )
 
-        meta = {}
+        arguments = {}
         if forwarded_headers:
-            meta["headers"] = forwarded_headers
+            arguments["headers"] = forwarded_headers
 
         logger.info(f"Calling endpoint: {endpoint_name}, with no args")
         try:
