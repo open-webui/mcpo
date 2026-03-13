@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
+from typing import Any, Dict, ForwardRef, List, Literal, Optional, Type, Union
 
 from anyio import ClosedResourceError
 from fastapi import HTTPException, Request
@@ -230,8 +230,14 @@ def _process_schema_property(
         return list_type_hint, pydantic_field
 
     elif prop_type == "string":
+        enum_values = prop_schema.get("enum")
+        if enum_values:
+            return Literal[tuple(enum_values)], pydantic_field
         return str, pydantic_field
     elif prop_type == "integer":
+        enum_values = prop_schema.get("enum")
+        if enum_values:
+            return Literal[tuple(enum_values)], pydantic_field
         return int, pydantic_field
     elif prop_type == "boolean":
         return bool, pydantic_field

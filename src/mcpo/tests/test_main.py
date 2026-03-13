@@ -1,6 +1,6 @@
 import pytest
 from pydantic import BaseModel, Field
-from typing import Any, List, Dict, Union
+from typing import Any, List, Dict, Literal, Union
 
 from mcpo.utils.main import _process_schema_property
 
@@ -306,7 +306,10 @@ def test_multi_type_property_with_any_of():
     assert len(result_type.__args__) == 3
     assert len(result_type.__args__[0].model_fields) == 2
     assert len(result_type.__args__[1].model_fields) == 1
-    assert result_type.__args__[2] is str
+    # Third type should be Literal['auto', 'none'] for enum strings
+    third_type = result_type.__args__[2]
+    assert hasattr(third_type, "__origin__") and third_type.__origin__ is Literal
+    assert set(third_type.__args__) == {"auto", "none"}
 
     # assert result_field parameter config
     assert result_field.description == "A property with multiple types"
@@ -325,3 +328,53 @@ def test_ref_to_parent_node():
 
     assert result_type == Any
     assert result_field.description == ""
+
+
+def test_process_string_enum():
+    """Test that string type with enum returns Literal type."""
+    schema = {
+        "type": "string",
+        "enum": ["read", "write", "admin"],
+        "description": "User permission level",
+    }
+    expected_field = Field(default=..., description="User permission level")
+    result_type, result_field = _process_schema_property(
+        _model_cache, schema, "test", "permission", True
+    )
+
+    assert hasattr(result_type, "__origin__") and result_type.__origin__ is Literal
+    assert set(result_type.__args__) == {"read", "write", "admin"}
+    assert result_field.default == expected_field.default
+    assert result_field.description == expected_field.description
+
+
+def test_process_integer_enum():
+    """Test that integer type with enum returns Literal type."""
+    schema = {
+        "type": "integer",
+        "enum": [1, 2, 3],
+        "description": "Priority level",
+    }
+    expected_field = Field(default=..., description="Priority level")
+    result_type, result_field = _process_schema_property(
+        _model_cache, schema, "test", "priority", True
+    )
+
+    assert hasattr(result_type, "__origin__") and result_type.__origin__ is Literal
+    assert set(result_type.__args__) == {1, 2, 3}
+    assert result_field.default == expected_field.default
+    assert result_field.description == expected_field.description
+
+
+def test_process_string_without_enum():
+    """Test that string type without enum still returns str."""
+    schema = {
+        "type": "string",
+        "description": "A simple string without enum",
+    }
+    result_type, result_field = _process_schema_property(
+        _model_cache, schema, "test", "name", True
+    )
+
+    assert result_type is str
+    assert result_field.description == "A simple string without enum"
