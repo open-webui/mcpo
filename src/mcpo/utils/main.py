@@ -95,6 +95,7 @@ def _process_schema_property(
     prop_name: str,
     is_required: bool,
     schema_defs: Optional[Dict] = None,
+    root_properties: Optional[Dict] = None,
 ) -> tuple[Union[Type, List, ForwardRef, Any], FieldInfo]:
     """
     Recursively processes a schema property to determine its Python type hint
@@ -107,21 +108,53 @@ def _process_schema_property(
     if "$ref" in prop_schema:
         ref = prop_schema["$ref"]
         if ref.startswith("#/properties/"):
-            # Remove common prefix in pathes.
+            # Handle $ref to properties (e.g., "#/properties/event_time_start")
             prefix_path = model_name_prefix.split("_form_model_")[-1]
             ref_path = ref.split("#/properties/")[-1]
-            # Translate $ref path to model_name_prefix style.
-            ref_path = ref_path.replace("/properties/", "_model_")
-            ref_path = ref_path.replace("/items", "_item")
+            # Translate $ref path to model_name_prefix style for circular reference check
+            ref_path_normalized = ref_path.replace("/properties/", "_model_")
+            ref_path_normalized = ref_path_normalized.replace("/items", "_item")
             # If $ref path is a prefix substring of model_name_prefix path,
             # there exists a circular reference.
-            # The loop should be broke with a return to avoid exception.
-            if prefix_path.startswith(ref_path):
-                # TODO: Find the exact type hint for the $ref.
+            if prefix_path.startswith(ref_path_normalized):
                 return Any, Field(default=None, description="")
-        ref = ref.split("/")[-1]
-        assert ref in schema_defs, "Custom field not found"
-        prop_schema = schema_defs[ref]
+            # Resolve the reference from root_properties
+            if root_properties:
+                # Parse the path segments (e.g., "event_time_start" or "nested/properties/field")
+                path_segments = ref_path.split("/")
+                resolved_schema = root_properties
+                for segment in path_segments:
+                    if segment == "properties" and isinstance(resolved_schema, dict):
+                        resolved_schema = resolved_schema.get("properties", {})
+                    elif isinstance(resolved_schema, dict):
+                        resolved_schema = resolved_schema.get(segment)
+                    else:
+                        resolved_schema = None
+                        break
+                if resolved_schema and isinstance(resolved_schema, dict):
+                    # Merge any additional properties from the original prop_schema (like description)
+                    merged_schema = dict(resolved_schema)
+                    for key in prop_schema:
+                        if key != "$ref":
+                            merged_schema[key] = prop_schema[key]
+                    prop_schema = merged_schema
+                else:
+                    return Any, Field(default=None, description=prop_schema.get("description", ""))
+            else:
+                return Any, Field(default=None, description=prop_schema.get("description", ""))
+        elif ref.startswith("#/$defs/") or ref.startswith("#/definitions/"):
+            ref_name = ref.split("/")[-1]
+            if schema_defs and ref_name in schema_defs:
+                prop_schema = schema_defs[ref_name]
+            else:
+                return Any, Field(default=None, description=prop_schema.get("description", ""))
+        else:
+            # Handle other $ref formats (just take the last segment)
+            ref_name = ref.split("/")[-1]
+            if schema_defs and ref_name in schema_defs:
+                prop_schema = schema_defs[ref_name]
+            else:
+                return Any, Field(default=None, description=prop_schema.get("description", ""))
 
     prop_type = prop_schema.get("type")
     prop_desc = prop_schema.get("description", "")
@@ -141,6 +174,7 @@ def _process_schema_property(
                 f"choice_{i}",
                 False,
                 schema_defs=schema_defs,
+                root_properties=root_properties,
             )
             type_hints.append(type_hint)
         return Union[tuple(type_hints)], pydantic_field
@@ -160,6 +194,7 @@ def _process_schema_property(
                 prop_name,
                 False,
                 schema_defs=schema_defs,
+                root_properties=root_properties,
             )
             type_hints.append(type_hint)
 
@@ -187,6 +222,7 @@ def _process_schema_property(
                 name,
                 is_nested_required,
                 schema_defs,
+                root_properties=root_properties,
             )
 
             if name_needs_alias(name):
@@ -225,6 +261,7 @@ def _process_schema_property(
             "item",
             False,  # Items aren't required at this level,
             schema_defs,
+            root_properties=root_properties,
         )
         list_type_hint = List[item_type_hint]
         return list_type_hint, pydantic_field
@@ -257,6 +294,7 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
             param_name,
             is_required,
             schema_defs,
+            root_properties=properties,
         )
 
         # Handle parameter names with leading underscores (e.g., __top, __filter) which Pydantic v2 does not allow
