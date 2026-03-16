@@ -34,13 +34,11 @@ MCP_ERROR_TO_HTTP_STATUS = {
 
 logger = logging.getLogger(__name__)
 
-
 def normalize_server_type(server_type: str) -> str:
     """Normalize server_type to a standard value."""
     if server_type in ["streamable_http", "streamablehttp", "streamable-http"]:
         return "streamable-http"
     return server_type
-
 
 def process_tool_response(result: CallToolResult) -> list:
     """Universal response processor for all tool endpoints"""
@@ -155,12 +153,7 @@ def _process_schema_property(
             temp_schema = dict(prop_schema)
             temp_schema["type"] = type_option
             type_hint, _ = _process_schema_property(
-                _model_cache,
-                temp_schema,
-                model_name_prefix,
-                prop_name,
-                False,
-                schema_defs=schema_defs,
+                _model_cache, temp_schema, model_name_prefix, prop_name, False, schema_defs=schema_defs
             )
             type_hints.append(type_hint)
 
