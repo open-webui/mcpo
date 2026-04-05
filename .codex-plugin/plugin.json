@@ -1,0 +1,24 @@
+{
+  "name": "mcpo",
+  "version": "0.1.0",
+  "description": "MCP-to-OpenAPI proxy server from Codex via MCP",
+  "author": {
+    "name": "open-webui",
+    "url": "https://github.com/open-webui/mcpo"
+  },
+  "homepage": "https://github.com/open-webui/mcpo",
+  "repository": "https://github.com/open-webui/mcpo",
+  "keywords": [
+    "mcp",
+    "codex"
+  ],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "MCPO",
+    "shortDescription": "MCP-to-OpenAPI proxy server from Codex via MCP",
+    "longDescription": "A simple, secure MCP-to-OpenAPI proxy server.",
+    "category": "Development",
+    "websiteURL": "https://github.com/open-webui/mcpo"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mcpo": {
+      "command": "uvx",
+      "args": [
+        "mcpo"
+      ]
+    }
+  }
+}
