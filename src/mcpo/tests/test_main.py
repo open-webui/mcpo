@@ -1,5 +1,5 @@
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from typing import Any, List, Dict, Union
 
 from mcpo.utils.main import _process_schema_property
@@ -84,6 +84,24 @@ def test_process_unknown_type():
     )
     assert result_type == expected_type
     assert result_field.default == expected_field.default
+
+
+def test_process_string_enum_preserves_schema():
+    schema = {
+        "type": "string",
+        "enum": ["title", "author", "date"],
+        "description": "Sort field",
+    }
+    result_type, result_field = _process_schema_property(
+        _model_cache, schema, "test", "sort_by", True
+    )
+
+    model = create_model("EnumSchemaModel", sort_by=(result_type, result_field))
+    sort_by_schema = model.model_json_schema()["properties"]["sort_by"]
+
+    assert sort_by_schema["enum"] == ["title", "author", "date"]
+    assert sort_by_schema["type"] == "string"
+    assert sort_by_schema["description"] == "Sort field"
 
 
 def test_process_array_of_strings():
@@ -306,7 +324,13 @@ def test_multi_type_property_with_any_of():
     assert len(result_type.__args__) == 3
     assert len(result_type.__args__[0].model_fields) == 2
     assert len(result_type.__args__[1].model_fields) == 1
-    assert result_type.__args__[2] is str
+    enum_choice_model = create_model(
+        "AnyOfEnumChoiceModel",
+        value=(result_type.__args__[2], Field(default=...)),
+    )
+    enum_choice_schema = enum_choice_model.model_json_schema()["properties"]["value"]
+    assert enum_choice_schema["enum"] == ["auto", "none"]
+    assert enum_choice_schema["type"] == "string"
 
     # assert result_field parameter config
     assert result_field.description == "A property with multiple types"

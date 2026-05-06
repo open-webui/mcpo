@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
+from typing import Any, Dict, ForwardRef, List, Literal, Optional, Type, Union
 
 from anyio import ClosedResourceError
 from fastapi import HTTPException, Request
@@ -88,6 +88,25 @@ def generate_alias_name(original_name: str, existing_names: set) -> str:
     return alias_name
 
 
+def _literal_type_from_enum(enum_values: Any) -> Optional[Any]:
+    if not isinstance(enum_values, list) or not enum_values:
+        return None
+
+    try:
+        return Literal[tuple(enum_values)]
+    except TypeError:
+        return None
+
+
+def _field_for_schema(
+    default_value: Any, description: str, prop_schema: Dict[str, Any]
+) -> FieldInfo:
+    field_args = {"default": default_value, "description": description}
+    if "enum" in prop_schema:
+        field_args["json_schema_extra"] = {"enum": prop_schema["enum"]}
+    return Field(**field_args)
+
+
 def _process_schema_property(
     _model_cache: Dict[str, Type],
     prop_schema: Dict[str, Any],
@@ -127,7 +146,7 @@ def _process_schema_property(
     prop_desc = prop_schema.get("description", "")
 
     default_value = ... if is_required else prop_schema.get("default", None)
-    pydantic_field = Field(default=default_value, description=prop_desc)
+    pydantic_field = _field_for_schema(default_value, prop_desc, prop_schema)
 
     # Handle the case where prop_type is missing but 'anyOf' key exists
     # In this case, use data type from 'anyOf' to determine the type hint
@@ -166,6 +185,10 @@ def _process_schema_property(
         # Return a Union of all possible types
         return Union[tuple(type_hints)], pydantic_field
 
+    enum_type_hint = _literal_type_from_enum(prop_schema.get("enum"))
+    if enum_type_hint is not None:
+        return enum_type_hint, pydantic_field
+
     if prop_type == "object":
         nested_properties = prop_schema.get("properties", {})
         nested_required = prop_schema.get("required", [])
@@ -198,6 +221,7 @@ def _process_schema_property(
                     default=nested_pydantic_field.default,
                     description=nested_pydantic_field.description,
                     alias=name,
+                    json_schema_extra=nested_pydantic_field.json_schema_extra,
                 )
                 nested_fields[alias_name] = (nested_type_hint, aliased_field)
             else:
@@ -267,6 +291,7 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
                 default=pydantic_field_info.default,
                 description=pydantic_field_info.description,
                 alias=param_name,
+                json_schema_extra=pydantic_field_info.json_schema_extra,
             )
             # Use the generated type hint and Field info
             model_fields[alias_name] = (python_type_hint, aliased_field)
