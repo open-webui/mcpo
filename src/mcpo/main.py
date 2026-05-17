@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_offline import FastAPIOffline
 from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
@@ -66,6 +67,7 @@ class MCPConnectionManager:
         command: Optional[str],
         args: List[str],
         env: Dict[str, str],
+        cwd: Optional[str],
         headers: Optional[Dict[str, str]],
         connection_timeout: Optional[int],
         auth_provider: Optional[Any] = None,
@@ -74,6 +76,7 @@ class MCPConnectionManager:
         self.command = command
         self.args = args
         self.env = env
+        self.cwd = cwd
         self.headers = headers
         self.connection_timeout = connection_timeout
         self.auth_provider = auth_provider
@@ -168,6 +171,7 @@ class MCPConnectionManager:
                 command=self.command,
                 args=self.args,
                 env={**os.environ, **self.env},
+                cwd=self.cwd,
             )
             return stdio_client(server_params)
         if self.server_type == "sse":
@@ -201,6 +205,12 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
             raise ValueError(f"Server '{server_name}' 'command' must be a string")
         if server_cfg.get("args") and not isinstance(server_cfg["args"], list):
             raise ValueError(f"Server '{server_name}' 'args' must be a list")
+        if (
+            "cwd" in server_cfg
+            and server_cfg["cwd"] is not None
+            and not isinstance(server_cfg["cwd"], str)
+        ):
+            raise ValueError(f"Server '{server_name}' 'cwd' must be a string")
     elif server_cfg.get("url") and not server_type:
         # Fallback for old SSE config without explicit type
         pass
@@ -260,9 +270,9 @@ def create_sub_app(
     api_dependency,
     connection_timeout,
     lifespan,
-) -> FastAPI:
+) -> FastAPIOffline:
     """Create a sub-application for an MCP server."""
-    sub_app = FastAPI(
+    sub_app = FastAPIOffline(
         title=f"{server_name}",
         description=f"{server_name} MCP Server\n\n- [back to tool list](/docs)",
         version="1.0",
@@ -284,6 +294,7 @@ def create_sub_app(
         sub_app.state.command = server_cfg["command"]
         sub_app.state.args = server_cfg.get("args", [])
         sub_app.state.env = {**os.environ, **server_cfg.get("env", {})}
+        sub_app.state.cwd = server_cfg.get("cwd")
 
     server_config_type = server_cfg.get("type")
     if server_config_type == "sse" and server_cfg.get("url"):
@@ -578,6 +589,7 @@ async def lifespan(app: FastAPI):
     args = getattr(app.state, "args", [])
     args = args if isinstance(args, list) else [args]
     env = getattr(app.state, "env", {})
+    cwd = getattr(app.state, "cwd", None)
     connection_timeout = getattr(app.state, "connection_timeout", CONNECTION_TIMEOUT)
     api_dependency = getattr(app.state, "api_dependency", None)
     path_prefix = getattr(app.state, "path_prefix", "/")
@@ -708,6 +720,7 @@ async def lifespan(app: FastAPI):
                 command=command,
                 args=args,
                 env=env,
+                cwd=cwd,
                 headers=headers,
                 connection_timeout=connection_timeout,
                 auth_provider=auth_provider,
@@ -810,7 +823,7 @@ async def run(
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()
 
-    main_app = FastAPI(
+    main_app = FastAPIOffline(
         title=name,
         description=description,
         version=version,
@@ -868,6 +881,7 @@ async def run(
         main_app.state.command = server_command[0]
         main_app.state.args = server_command[1:]
         main_app.state.env = os.environ.copy()
+        main_app.state.cwd = None
         main_app.state.api_dependency = api_dependency
     elif config_path:
         logger.info(f"Loading MCP server configurations from: {config_path}")

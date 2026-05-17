@@ -6,10 +6,13 @@ authors = [
     { name = "Timothy Jaeryang Baek", email = "tim@openwebui.com" }
 ]
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1.8",
     "fastapi>=0.115.12",
+    "fastapi-offline>=1.7.6",
     "mcp>=1.17.0",
     "mcp[cli]>=1.17.0",
     "passlib[bcrypt]>=1.7.4",

@@ -111,12 +111,13 @@ Example config.json:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "cwd": "/tmp"
     },
     "time": {
       "command": "uvx",
       "args": ["mcp-server-time", "--local-timezone=America/New_York"],
-      "disabledTools": ["convert_time"] // Disable specific tools if needed
+      "disabled_tools": ["convert_time"] // Disable specific tools if needed
     },
     "mcp_sse": {
       "type": "sse", // Explicitly define type
@@ -133,6 +134,10 @@ Example config.json:
   }
 }
 ```
+
+Use `disabled_tools` to hide specific MCP tools from the generated OpenAPI
+server. The legacy camelCase key `disabledTools` is still accepted for
+backwards compatibility.
 
 Each tool will be accessible under its own unique route, e.g.:
 - http://localhost:8000/memory
