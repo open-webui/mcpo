@@ -46,8 +46,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.api_key = api_key
 
     async def dispatch(self, request: Request, call_next):
-        # Skip authentication for OPTIONS requests
-        if request.method == "OPTIONS":
+        # Skip authentication for OPTIONS requests and health endpoint
+        if request.method == "OPTIONS" or request.url.path == "/health":
             return await call_next(request)
 
         # Get authorization header

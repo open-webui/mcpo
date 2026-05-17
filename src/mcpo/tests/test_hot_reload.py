@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI
 
-from mcpo.main import load_config, validate_server_config, reload_config_handler
+from mcpo.main import (
+    load_config,
+    register_health_endpoint,
+    reload_config_handler,
+    validate_server_config,
+)
 
 
 def test_validate_server_config_stdio():
@@ -155,3 +160,112 @@ def test_config_watcher_initialization():
         assert watcher.reload_callback == callback
     finally:
         os.unlink(config_path)
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_all_healthy():
+    """Test health endpoint reports healthy when all servers are ok."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = FastAPI()
+    register_health_endpoint(app)
+
+    sub_app = FastAPI(title="test_server")
+    sub_app.state.is_connected = True
+    mock_session = AsyncMock()
+    mock_session.send_ping = AsyncMock(return_value=None)
+    mock_manager = AsyncMock()
+    mock_manager.get_session = AsyncMock(return_value=mock_session)
+    sub_app.state.session_manager = mock_manager
+
+    app.mount("/test_server", sub_app)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["servers"]["test_server"]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_server_unhealthy():
+    """Test health endpoint reports unhealthy when a server ping fails."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = FastAPI()
+    register_health_endpoint(app)
+
+    sub_app = FastAPI(title="broken_server")
+    sub_app.state.is_connected = True
+    mock_session = AsyncMock()
+    mock_session.send_ping = AsyncMock(side_effect=ConnectionError("pipe broken"))
+    mock_manager = AsyncMock()
+    mock_manager.get_session = AsyncMock(return_value=mock_session)
+    sub_app.state.session_manager = mock_manager
+
+    app.mount("/broken_server", sub_app)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "unhealthy"
+    assert data["servers"]["broken_server"]["status"] == "error"
+    assert "pipe broken" in data["servers"]["broken_server"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_disconnected_server():
+    """Test health endpoint reports disconnected for servers that never connected."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = FastAPI()
+    register_health_endpoint(app)
+
+    sub_app = FastAPI(title="offline_server")
+    sub_app.state.is_connected = False
+    sub_app.state.session_manager = None
+
+    app.mount("/offline_server", sub_app)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "unhealthy"
+    assert data["servers"]["offline_server"]["status"] == "disconnected"
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_single_server_mode():
+    """Test health endpoint works in single-server mode (no sub-apps)."""
+    from httpx import ASGITransport, AsyncClient
+
+    app = FastAPI(title="my_mcp_server")
+    register_health_endpoint(app)
+
+    mock_session = AsyncMock()
+    mock_session.send_ping = AsyncMock(return_value=None)
+    mock_manager = AsyncMock()
+    mock_manager.get_session = AsyncMock(return_value=mock_session)
+    app.state.session_manager = mock_manager
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["servers"]["my_mcp_server"]["status"] == "ok"

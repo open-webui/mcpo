@@ -12,6 +12,7 @@ from urllib.parse import urljoin
 import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
@@ -377,6 +378,53 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
                 del active_lifespans[server_name]
 
 
+async def _check_server_health(session_manager: "MCPConnectionManager") -> dict:
+    """Ping an MCP server and return its health status."""
+    try:
+        session = await session_manager.get_session()
+        await session.send_ping()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def register_health_endpoint(main_app: FastAPI) -> None:
+    """Register a /health endpoint that reports MCP server status."""
+
+    @main_app.get("/health", tags=["health"])
+    async def health():
+        servers = {}
+
+        # Check mounted sub-apps (multi-server / config mode)
+        for route in main_app.routes:
+            if isinstance(route, Mount) and isinstance(route.app, FastAPI):
+                sub_app = route.app
+                server_name = sub_app.title
+                is_connected = getattr(sub_app.state, "is_connected", False)
+                session_manager = getattr(sub_app.state, "session_manager", None)
+
+                if not is_connected or not session_manager:
+                    servers[server_name] = {"status": "disconnected"}
+                    continue
+
+                servers[server_name] = await _check_server_health(session_manager)
+
+        # Single-server mode (no sub-apps mounted)
+        if not servers:
+            session_manager = getattr(main_app.state, "session_manager", None)
+            if session_manager:
+                servers[main_app.title] = await _check_server_health(session_manager)
+
+        all_ok = all(s["status"] == "ok" for s in servers.values())
+        status = "healthy" if all_ok else "unhealthy"
+        status_code = 200 if all_ok else 503
+
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": status, "servers": servers},
+        )
+
+
 async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, Any]):
     """Handle config reload by comparing and updating mounted servers."""
     old_config_data = getattr(main_app.state, "config_data", {})
@@ -538,7 +586,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             f"{endpoint_name}_form_model",
             inputSchema.get("properties", {}),
             inputSchema.get("required", []),
-            inputSchema.get("$defs", {}),
+            {**inputSchema.get("definitions", {}), **inputSchema.get("$defs", {})},
         )
 
         response_model_fields = None
@@ -547,7 +595,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
                 f"{endpoint_name}_response_model",
                 outputSchema.get("properties", {}),
                 outputSchema.get("required", []),
-                outputSchema.get("$defs", {}),
+                {**outputSchema.get("definitions", {}), **outputSchema.get("$defs", {})},
             )
 
         # Get client header forwarding configuration from app state
@@ -835,6 +883,9 @@ async def run(
     # Add middleware to protect also documentation and spec
     if api_key and strict_auth:
         main_app.add_middleware(APIKeyMiddleware, api_key=api_key)
+
+    # Register health check endpoint (accessible without auth)
+    register_health_endpoint(main_app)
 
     headers = kwargs.get("headers")
     if headers and isinstance(headers, str):
