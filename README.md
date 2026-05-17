@@ -111,7 +111,8 @@ Example config.json:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "cwd": "/tmp"
     },
     "time": {
       "command": "uvx",

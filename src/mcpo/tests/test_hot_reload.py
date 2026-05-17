@@ -6,12 +6,19 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI
 
-from mcpo.main import load_config, validate_server_config, reload_config_handler
+from mcpo.main import (
+    MCPConnectionManager,
+    create_sub_app,
+    lifespan,
+    load_config,
+    reload_config_handler,
+    validate_server_config,
+)
 
 
 def test_validate_server_config_stdio():
     """Test validation of stdio server configuration."""
-    config = {"command": "echo", "args": ["hello", "world"]}
+    config = {"command": "echo", "args": ["hello", "world"], "cwd": "/tmp"}
     # Should not raise
     validate_server_config("test_server", config)
 
@@ -29,6 +36,13 @@ def test_validate_server_config_invalid():
     with pytest.raises(
         ValueError, match="must have either 'command' for stdio or 'type' and 'url'"
     ):
+        validate_server_config("test_server", config)
+
+
+def test_validate_server_config_invalid_cwd():
+    """Test validation fails for a non-string cwd."""
+    config = {"command": "echo", "cwd": ["not", "a", "path"]}
+    with pytest.raises(ValueError, match="'cwd' must be a string"):
         validate_server_config("test_server", config)
 
 
@@ -58,7 +72,9 @@ def test_validate_server_config_disabled_tools_invalid():
 def test_load_config_valid():
     """Test loading a valid config file."""
     config_data = {
-        "mcpServers": {"test_server": {"command": "echo", "args": ["hello"]}}
+        "mcpServers": {
+            "test_server": {"command": "echo", "args": ["hello"], "cwd": "/tmp"}
+        }
     }
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -70,6 +86,41 @@ def test_load_config_valid():
         assert result == config_data
     finally:
         os.unlink(config_path)
+
+
+def test_create_sub_app_stores_stdio_cwd():
+    """Test cwd is stored for stdio servers."""
+    app = create_sub_app(
+        "test_server",
+        {"command": "echo", "args": ["hello"], "cwd": "/tmp"},
+        cors_allow_origins=["*"],
+        api_key=None,
+        strict_auth=False,
+        api_dependency=None,
+        connection_timeout=None,
+        lifespan=lifespan,
+    )
+
+    assert app.state.cwd == "/tmp"
+
+
+def test_connection_manager_passes_stdio_cwd():
+    """Test cwd is passed to MCP stdio server parameters."""
+    manager = MCPConnectionManager(
+        server_type="stdio",
+        command="echo",
+        args=["hello"],
+        env={},
+        cwd="/tmp",
+        headers=None,
+        connection_timeout=None,
+    )
+
+    with patch("mcpo.main.stdio_client") as mock_stdio_client:
+        manager._create_client_context()
+
+    server_params = mock_stdio_client.call_args.args[0]
+    assert server_params.cwd == "/tmp"
 
 
 def test_load_config_invalid_json():
