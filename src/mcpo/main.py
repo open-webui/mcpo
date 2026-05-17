@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_offline import FastAPIOffline
 from starlette.routing import Mount
 
 from mcp import ClientSession, StdioServerParameters
@@ -269,9 +270,9 @@ def create_sub_app(
     api_dependency,
     connection_timeout,
     lifespan,
-) -> FastAPI:
+) -> FastAPIOffline:
     """Create a sub-application for an MCP server."""
-    sub_app = FastAPI(
+    sub_app = FastAPIOffline(
         title=f"{server_name}",
         description=f"{server_name} MCP Server\n\n- [back to tool list](/docs)",
         version="1.0",
@@ -822,7 +823,7 @@ async def run(
     # Create shutdown handler
     shutdown_handler = GracefulShutdown()
 
-    main_app = FastAPI(
+    main_app = FastAPIOffline(
         title=name,
         description=description,
         version=version,

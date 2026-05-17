@@ -56,15 +56,17 @@ def test_validate_server_config_missing_url():
         validate_server_config("test_server", config)
 
 
-def test_validate_server_config_disabled_tools_valid():
-    """Test validation of server configuration with a valid disabledTools."""
-    config = {"command": "echo", "args": ["hello"], "disabledTools": ["search-web"]}
+@pytest.mark.parametrize("disabled_tools_key", ["disabled_tools", "disabledTools"])
+def test_validate_server_config_disabled_tools_valid(disabled_tools_key):
+    """Test validation of server configuration with valid disabled tools."""
+    config = {"command": "echo", "args": ["hello"], disabled_tools_key: ["search-web"]}
     validate_server_config("test_server", config)
 
 
-def test_validate_server_config_disabled_tools_invalid():
-    """Test validation fails for an invalid disabledTools."""
-    config = {"command": "echo", "args": ["hello"], "disabledTools": "not-a-list"}
+@pytest.mark.parametrize("disabled_tools_key", ["disabled_tools", "disabledTools"])
+def test_validate_server_config_disabled_tools_invalid(disabled_tools_key):
+    """Test validation fails for invalid disabled tools."""
+    config = {"command": "echo", "args": ["hello"], disabled_tools_key: "not-a-list"}
     with pytest.raises(ValueError, match="'disabledTools' must be a list"):
         validate_server_config("test_server", config)
 
