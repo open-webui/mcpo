@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 import traceback
@@ -32,6 +33,31 @@ MCP_ERROR_TO_HTTP_STATUS = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+async def _close_session_manager_after_cancel(
+    request: Request, session_manager: Any, endpoint_name: str
+) -> None:
+    logger.warning(
+        "MCP session operation for '%s' was cancelled; closing stale session",
+        endpoint_name,
+        exc_info=True,
+    )
+    request.app.state.session = None
+    try:
+        await session_manager.close()
+    except asyncio.CancelledError:
+        logger.warning(
+            "Cancelled while closing MCP session for '%s'",
+            endpoint_name,
+            exc_info=True,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to close MCP session after cancellation for '%s'",
+            endpoint_name,
+            exc_info=True,
+        )
 
 
 def normalize_server_type(server_type: str) -> str:
@@ -299,6 +325,17 @@ def get_tool_handler(
                     endpoint_name,
                 )
                 session, _ = await session_manager.reconnect()
+            except asyncio.CancelledError as e:
+                await _close_session_manager_after_cancel(
+                    request, session_manager, endpoint_name
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": "MCP session operation was cancelled",
+                        "error": str(e),
+                    },
+                )
             request.app.state.session = session
 
             try:
@@ -311,6 +348,17 @@ def get_tool_handler(
                 session, _ = await session_manager.reconnect()
                 request.app.state.session = session
                 return await _invoke(session)
+            except asyncio.CancelledError as e:
+                await _close_session_manager_after_cancel(
+                    request, session_manager, endpoint_name
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": "MCP session operation was cancelled",
+                        "error": str(e),
+                    },
+                )
 
         session = getattr(request.app.state, "session", None)
         if not session:
@@ -369,6 +417,8 @@ def get_tool_handler(
                 )
                 return final_response
 
+            except HTTPException:
+                raise
             except McpError as e:
                 logger.info(
                     f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
@@ -424,6 +474,8 @@ def get_tool_handler(
             )
             return final_response
 
+        except HTTPException:
+            raise
         except McpError as e:
             logger.info(
                 f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"

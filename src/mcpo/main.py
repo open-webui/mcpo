@@ -125,9 +125,9 @@ class MCPConnectionManager:
         client_context = self._create_client_context()
         try:
             connection = await client_context.__aenter__()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # Ensure the context is closed if entering fails
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await client_context.__aexit__(None, None, None)
             raise
 
@@ -135,10 +135,10 @@ class MCPConnectionManager:
         session = ClientSession(reader, writer)
         try:
             await session.__aenter__()
-        except Exception:
-            with contextlib.suppress(Exception):
+        except (Exception, asyncio.CancelledError):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await session.__aexit__(None, None, None)
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await client_context.__aexit__(None, None, None)
             raise
 
@@ -155,11 +155,11 @@ class MCPConnectionManager:
         self._initialize_result = None
 
         if session is not None:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await session.__aexit__(None, None, None)
 
         if client_context is not None:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await client_context.__aexit__(None, None, None)
 
     def _create_client_context(self):
