@@ -1,8 +1,15 @@
+import asyncio
+
 import pytest
+from fastapi import FastAPI, HTTPException
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 from typing import Any, List, Dict, Union
 
-from mcpo.utils.main import _process_schema_property
+from mcp import types
+from mcp.types import CallToolResult
+
+from mcpo.utils.main import _process_schema_property, get_tool_handler
 
 
 _model_cache = {}
@@ -325,3 +332,66 @@ def test_ref_to_parent_node():
 
     assert result_type == Any
     assert result_field.description == ""
+
+
+def make_request(app: FastAPI) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "app": app,
+            "method": "POST",
+            "path": "/test_tool",
+            "headers": [],
+        }
+    )
+
+
+def test_tool_handler_closes_session_manager_on_cancelled_error():
+    class CancelledSessionManager:
+        def __init__(self):
+            self.closed = False
+
+        async def ensure_initialized(self):
+            raise asyncio.CancelledError("sse reconnect cancelled")
+
+        async def close(self):
+            self.closed = True
+
+    app = FastAPI()
+    session_manager = CancelledSessionManager()
+    app.state.session_manager = session_manager
+    app.state.session = object()
+
+    handler = get_tool_handler("test_tool", {})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(handler(make_request(app)))
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail["message"] == "MCP session operation was cancelled"
+    assert session_manager.closed is True
+    assert app.state.session is None
+
+
+def test_tool_handler_preserves_http_exception_from_tool_error():
+    class ErrorSession:
+        async def call_tool(self, endpoint_name, arguments):
+            return CallToolResult(
+                content=[types.TextContent(type="text", text="tool failed")],
+                isError=True,
+            )
+
+    class SessionManager:
+        async def ensure_initialized(self):
+            return ErrorSession(), object()
+
+    app = FastAPI()
+    app.state.session_manager = SessionManager()
+
+    handler = get_tool_handler("test_tool", {})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(handler(make_request(app)))
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == {"message": "tool failed"}
