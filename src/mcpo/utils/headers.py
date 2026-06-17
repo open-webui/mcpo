@@ -1,6 +1,5 @@
 import logging
-import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from fastapi import Request
 
 logger = logging.getLogger(__name__)
