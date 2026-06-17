@@ -849,7 +849,7 @@ async def run(
     if client_header_forwarding and isinstance(client_header_forwarding, str):
         try:
             client_header_forwarding = json.loads(client_header_forwarding)
-            validate_client_header_forwarding_config("streamable-http", client_header_forwarding)
+            validate_client_header_forwarding_config("default", client_header_forwarding)
         except json.JSONDecodeError:
             logger.warning("Invalid JSON format for client header forwarding config. Client header forwarding config will be ignored.")
             client_header_forwarding = None
