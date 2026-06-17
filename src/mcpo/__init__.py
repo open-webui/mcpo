@@ -75,6 +75,9 @@ def main(
     log_level: Annotated[
         Optional[str], typer.Option("--log-level", help="Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     ] = None,
+    client_header_forwarding: Annotated[
+        Optional[str], typer.Option("--client-header-forwarding", help="Config for header forwarding")
+    ] = None
 ):
     server_command = None
     if not config_path:
@@ -114,7 +117,7 @@ def main(
         # Set environment variables
         for key, value in env_dict.items():
             os.environ[key] = value
-    except Exception as e:
+    except Exception:
         pass
 
     # Whatever the prefix is, make sure it starts and ends with a /
@@ -152,6 +155,7 @@ def main(
             root_path=root_path,
             headers=headers,
             hot_reload=hot_reload,
+            client_header_forwarding=client_header_forwarding
         )
     )
 

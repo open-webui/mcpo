@@ -755,6 +755,7 @@ async def run(
 
     # MCP Config
     config_path = kwargs.get("config_path")
+    client_header_forwarding = kwargs.get("client_header_forwarding", None)
 
     # mcpo server
     name = kwargs.get("name") or "MCP OpenAPI Proxy"
@@ -844,6 +845,15 @@ async def run(
             logger.warning("Invalid JSON format for headers. Headers will be ignored.")
             headers = None
 
+    client_header_forwarding = kwargs.get("client_header_forwarding")
+    if client_header_forwarding and isinstance(client_header_forwarding, str):
+        try:
+            client_header_forwarding = json.loads(client_header_forwarding)
+            validate_client_header_forwarding_config("default", client_header_forwarding)
+        except json.JSONDecodeError:
+            logger.warning("Invalid JSON format for client header forwarding config. Client header forwarding config will be ignored.")
+            client_header_forwarding = None
+
     if server_type == "sse":
         logger.info(
             f"Configuring for a single SSE MCP Server with URL {server_command[0]}"
@@ -860,6 +870,7 @@ async def run(
         main_app.state.args = server_command[0]  # Expects URL as the first element
         main_app.state.api_dependency = api_dependency
         main_app.state.headers = headers
+        main_app.state.client_header_forwarding = client_header_forwarding
     elif server_command:  # This handles stdio
         logger.info(
             f"Configuring for a single Stdio MCP Server with command: {' '.join(server_command)}"

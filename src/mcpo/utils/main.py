@@ -283,12 +283,12 @@ def get_tool_handler(
     client_header_forwarding_config=None,
 ):
     async def call_tool_with_reconnect(
-        request: Request, arguments: Dict[str, Any]
+        request: Request, arguments: Dict[str, Any], meta: Dict[str, Any]
     ) -> CallToolResult:
         session_manager = getattr(request.app.state, "session_manager", None)
 
         async def _invoke(session):
-            return await session.call_tool(endpoint_name, arguments=arguments)
+            return await session.call_tool(endpoint_name, arguments=arguments, meta=meta)
 
         if session_manager:
             try:
@@ -349,7 +349,7 @@ def get_tool_handler(
 
             logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
             try:
-                result = await call_tool_with_reconnect(request, args)
+                result = await call_tool_with_reconnect(request, args, meta)
 
                 if result.isError:
                     error_message = "Unknown tool execution error"
@@ -409,7 +409,7 @@ def get_tool_handler(
 
         logger.info(f"Calling endpoint: {endpoint_name}, with no args")
         try:
-            result = await call_tool_with_reconnect(request, {})
+            result = await call_tool_with_reconnect(request, {}, meta)
 
             if result.isError:
                 error_message = "Unknown tool execution error"
