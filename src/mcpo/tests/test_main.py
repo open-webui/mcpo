@@ -195,6 +195,67 @@ def test_process_array_of_objects():
     assert item_model_fields["item_id"].is_required()
 
 
+def test_process_array_with_tuple_items():
+    # JSON Schema tuple validation: "items" is a LIST of schemas.
+    # Previously crashed with "AttributeError: 'list' object has no attribute
+    # 'get'" (issue #296). Should now yield List[Union[str, int]].
+    schema = {"type": "array", "items": [{"type": "string"}, {"type": "integer"}]}
+    expected_field = Field(default=..., description="")
+    result_type, result_field = _process_schema_property(
+        _model_cache, schema, "test", "prop", True
+    )
+
+    assert str(result_type).startswith("typing.List[")
+    inner = result_type.__args__[0]  # the Union inside List[...]
+    assert inner.__origin__ == Union
+    assert str in inner.__args__
+    assert int in inner.__args__
+    assert result_field.default == expected_field.default
+
+
+def test_process_array_with_single_tuple_item():
+    # A one-element tuple-validation list should collapse to List[<type>].
+    schema = {"type": "array", "items": [{"type": "string"}]}
+    result_type, _ = _process_schema_property(
+        _model_cache, schema, "test", "prop", False
+    )
+    assert result_type == List[str]
+
+
+def test_process_array_with_empty_tuple_items():
+    # An empty tuple ("items": []) should fall back to List[Any] rather than
+    # crash (exercises the empty-element guard in the tuple branch).
+    schema = {"type": "array", "items": []}
+    result_type, _ = _process_schema_property(
+        _model_cache, schema, "test", "prop", False
+    )
+    assert result_type == List[Any]
+
+
+def test_process_array_with_prefix_items():
+    # Draft 2020-12 spells tuple validation as "prefixItems"; handle it the
+    # same way as a list-valued "items".
+    schema = {"type": "array", "prefixItems": [{"type": "string"}, {"type": "integer"}]}
+    result_type, _ = _process_schema_property(
+        _model_cache, schema, "test", "prop", True
+    )
+    assert str(result_type).startswith("typing.List[")
+    inner = result_type.__args__[0]
+    assert inner.__origin__ == Union
+    assert str in inner.__args__
+    assert int in inner.__args__
+
+
+def test_process_array_tuple_with_non_object_item():
+    # A tuple element that is a boolean sub-schema (or otherwise not an object)
+    # must not crash; it degrades to Any instead of raising.
+    schema = {"type": "array", "items": [True, {"type": "string"}]}
+    result_type, _ = _process_schema_property(
+        _model_cache, schema, "test", "prop", False
+    )
+    assert str(result_type).startswith("typing.List[")
+
+
 def test_process_empty_object():
     schema = {"type": "object", "properties": {}}
     expected_type = Dict[str, Any]  # Should default to Dict[str, Any] if no properties

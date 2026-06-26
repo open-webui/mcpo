@@ -213,11 +213,50 @@ def _process_schema_property(
 
     elif prop_type == "array":
         items_schema = prop_schema.get("items")
+
+        # JSON Schema "tuple validation" describes each position with its own
+        # schema. Draft-07 (and earlier) spells this as a list-valued "items";
+        # Draft 2020-12 renames it to "prefixItems". Either form would
+        # otherwise be passed into the recursive call below and crash on a
+        # `.get()` against a list (see issue #296). Collect the element schemas
+        # and represent the array as a list of their union.
+        prefix_items = prop_schema.get("prefixItems")
+        element_schemas = None
+        if isinstance(items_schema, list):
+            element_schemas = items_schema
+        elif isinstance(prefix_items, list):
+            element_schemas = list(prefix_items)
+            # In 2020-12 an object-valued "items" types the elements after the
+            # prefix tuple; fold it into the union too.
+            if isinstance(items_schema, dict):
+                element_schemas.append(items_schema)
+
+        if element_schemas is not None:
+            item_type_hints = []
+            for i, item_schema in enumerate(element_schemas):
+                if not isinstance(item_schema, dict):
+                    # boolean sub-schema (true/false) or other non-object form
+                    item_type_hints.append(Any)
+                    continue
+                item_type_hint, _ = _process_schema_property(
+                    _model_cache,
+                    item_schema,
+                    f"{model_name_prefix}_{prop_name}",
+                    f"item_{i}",
+                    False,  # Items aren't required at this level,
+                    schema_defs,
+                )
+                item_type_hints.append(item_type_hint)
+            if not item_type_hints:
+                # Empty tuple (e.g. "items": []) -> list of anything
+                return List[Any], pydantic_field
+            return List[Union[tuple(item_type_hints)]], pydantic_field
+
         if not items_schema:
-            # Default to list of anything if items schema is missing
+            # Missing/empty items schema -> list of anything
             return List[Any], pydantic_field
 
-        # Recursively determine the type of items in the array
+        # Single-schema "items": one schema for every element (unchanged path).
         item_type_hint, _ = _process_schema_property(
             _model_cache,
             items_schema,
