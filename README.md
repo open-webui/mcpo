@@ -111,7 +111,8 @@ Example config.json:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "cwd": "/path/to/project"
     },
     "time": {
       "command": "uvx",
@@ -129,10 +130,26 @@ Example config.json:
     "mcp_streamable_http": {
       "type": "streamable-http",
       "url": "http://127.0.0.1:8002/mcp"
-    } // Streamable HTTP MCP Server
+    }, // Streamable HTTP MCP Server
+    "xquik": {
+      "type": "streamable-http",
+      "url": "https://xquik.com/mcp",
+      "oauth": {
+        "server_url": "https://xquik.com"
+      }
+    }
   }
 }
 ```
+
+The optional `cwd` field sets the child process directory for stdio servers.
+
+The Xquik entry uses OAuth 2.1 dynamic client registration. On first connection,
+mcpo opens the authorization flow and stores the resulting token. For headless
+API-key setup, follow the [Xquik MCP authentication guide](https://docs.xquik.com/mcp/overview)
+and keep credentials out of committed config files.
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
 
 Each tool will be accessible under its own unique route, e.g.:
 - http://localhost:8000/memory

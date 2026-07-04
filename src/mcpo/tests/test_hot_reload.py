@@ -1,12 +1,19 @@
-import os
 import json
+import os
 import tempfile
-import asyncio
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
+
 import pytest
 from fastapi import FastAPI
 
-from mcpo.main import load_config, validate_server_config, reload_config_handler
+import mcpo.main as main_module
+from mcpo.main import (
+    MCPConnectionManager,
+    create_sub_app,
+    load_config,
+    reload_config_handler,
+    validate_server_config,
+)
 
 
 def test_validate_server_config_stdio():
@@ -14,6 +21,57 @@ def test_validate_server_config_stdio():
     config = {"command": "echo", "args": ["hello", "world"]}
     # Should not raise
     validate_server_config("test_server", config)
+
+
+def test_validate_server_config_stdio_cwd(tmp_path):
+    """Test validation and app state for a stdio working directory."""
+    cwd = str(tmp_path)
+    config = {"command": "python", "args": ["server.py"], "cwd": cwd}
+
+    validate_server_config("test_server", config)
+    app = create_sub_app(
+        "test_server",
+        config,
+        ["*"],
+        None,
+        False,
+        None,
+        None,
+        None,
+    )
+
+    assert app.state.cwd == cwd
+
+
+@pytest.mark.parametrize("cwd", [None, "", "   ", 7, []])
+def test_validate_server_config_invalid_cwd(cwd):
+    """Test validation fails for an invalid stdio working directory."""
+    with pytest.raises(ValueError, match="'cwd' must be a non-empty string"):
+        validate_server_config("test_server", {"command": "python", "cwd": cwd})
+
+
+def test_stdio_connection_forwards_cwd(monkeypatch, tmp_path):
+    """Test the configured working directory reaches the MCP SDK."""
+    captured = {}
+    context = object()
+
+    def capture_stdio_client(server_params):
+        captured["server_params"] = server_params
+        return context
+
+    monkeypatch.setattr(main_module, "stdio_client", capture_stdio_client)
+    manager = MCPConnectionManager(
+        server_type="stdio",
+        command="python",
+        args=["server.py"],
+        env={},
+        headers=None,
+        connection_timeout=None,
+        cwd=str(tmp_path),
+    )
+
+    assert manager._create_client_context() is context
+    assert captured["server_params"].cwd == str(tmp_path)
 
 
 def test_validate_server_config_sse():
