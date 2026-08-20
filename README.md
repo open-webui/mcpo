@@ -74,6 +74,8 @@ That’s it. Your MCP tool is now available at http://localhost:8000 with a gene
 
 🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/openapi-servers/open-webui/).**
 
+Use `--preserve-tool-names` to use MCP tool names as OpenAPI operation IDs.
+
 
 ### 🌐 Serving Under a Subpath (`--root-path`)
 

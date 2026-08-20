@@ -72,6 +72,9 @@ def main(
     hot_reload: Annotated[
         Optional[bool], typer.Option("--hot-reload", help="Enable hot reload for config file changes")
     ] = False,
+    preserve_tool_names: Annotated[
+        Optional[bool], typer.Option("--preserve-tool-names", help="Use MCP tool names as OpenAPI operation IDs")
+    ] = False,
     log_level: Annotated[
         Optional[str], typer.Option("--log-level", help="Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     ] = None,
@@ -152,6 +155,7 @@ def main(
             root_path=root_path,
             headers=headers,
             hot_reload=hot_reload,
+            preserve_tool_names=preserve_tool_names,
         )
     )
 
