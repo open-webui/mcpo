@@ -260,6 +260,7 @@ def create_sub_app(
     api_dependency,
     connection_timeout,
     lifespan,
+    preserve_tool_names: bool = False,
 ) -> FastAPI:
     """Create a sub-application for an MCP server."""
     sub_app = FastAPI(
@@ -309,6 +310,7 @@ def create_sub_app(
 
     sub_app.state.api_dependency = api_dependency
     sub_app.state.connection_timeout = connection_timeout
+    sub_app.state.preserve_tool_names = preserve_tool_names
 
     # Store list of tools to be disabled, if present (accept both key styles)
     disabled_tools = server_cfg.get("disabledTools")
@@ -339,6 +341,7 @@ def mount_config_servers(
     connection_timeout,
     lifespan,
     path_prefix: str,
+    preserve_tool_names: bool = False,
 ):
     """Mount MCP servers from config data."""
     mcp_servers = config_data.get("mcpServers", {})
@@ -354,6 +357,7 @@ def mount_config_servers(
             api_dependency,
             connection_timeout,
             lifespan,
+            preserve_tool_names,
         )
         main_app.mount(f"{path_prefix}{server_name}", sub_app)
 
@@ -399,6 +403,7 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         connection_timeout = getattr(main_app.state, "connection_timeout", None)
         lifespan = getattr(main_app.state, "lifespan", None)
         path_prefix = getattr(main_app.state, "path_prefix", "/")
+        preserve_tool_names = getattr(main_app.state, "preserve_tool_names", False)
 
         # Remove servers that are no longer in config
         if servers_to_remove:
@@ -439,6 +444,7 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
                         api_dependency,
                         connection_timeout,
                         lifespan,
+                        preserve_tool_names,
                     )
                     main_app.mount(f"{path_prefix}{server_name}", sub_app)
 
@@ -568,6 +574,9 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             description=endpoint_description,
             response_model_exclude_none=True,
             dependencies=[Depends(api_dependency)] if api_dependency else [],
+            operation_id=endpoint_name
+            if getattr(app.state, "preserve_tool_names", False)
+            else None,
         )(tool_handler)
 
 
@@ -744,6 +753,7 @@ async def run(
     **kwargs,
 ):
     hot_reload = kwargs.get("hot_reload", False)
+    preserve_tool_names = kwargs.get("preserve_tool_names", False)
     # Server API Key
     api_dependency = get_verify_api_key(api_key) if api_key else None
     connection_timeout = kwargs.get("connection_timeout", None)
@@ -823,6 +833,7 @@ async def run(
     # Pass shutdown handler to app state
     main_app.state.shutdown_handler = shutdown_handler
     main_app.state.path_prefix = path_prefix
+    main_app.state.preserve_tool_names = preserve_tool_names
 
     main_app.add_middleware(
         CORSMiddleware,
@@ -882,6 +893,7 @@ async def run(
             connection_timeout,
             lifespan,
             path_prefix,
+            preserve_tool_names,
         )
 
         # Store config info and app state for hot reload
