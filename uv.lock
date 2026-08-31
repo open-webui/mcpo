@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 
 [[package]]
@@ -351,7 +351,7 @@ cli = [
 
 [[package]]
 name = "mcpo"
-version = "0.0.19"
+version = "0.0.20"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -377,7 +377,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.8" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "mcp", specifier = ">=1.17.0" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.17.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.17.0,<2" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "pydantic", specifier = ">=2.11.1" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
