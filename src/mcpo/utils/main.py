@@ -34,6 +34,25 @@ MCP_ERROR_TO_HTTP_STATUS = {
 logger = logging.getLogger(__name__)
 
 
+# python-sdk's StreamableHTTPTransport synthesizes this exact error on ANY
+# HTTP 404 response, discarding whatever JSON-RPC error body the server sent
+# (see _send_session_terminated_error in mcp/client/streamable_http.py). Note
+# it hardcodes a bare positive 32600, not the negative -32600 that
+# mcp.types.INVALID_REQUEST holds per the JSON-RPC spec — matching against
+# INVALID_REQUEST here would never fire.
+_SESSION_TERMINATED_CODE = 32600
+_SESSION_TERMINATED_MESSAGE = "Session terminated"
+
+
+def _is_session_terminated(exc: McpError) -> bool:
+    """True only for the client-synthesized 404-on-existing-session signal —
+    never a real tool-level or server-originated JSON-RPC error."""
+    return (
+        exc.error.code == _SESSION_TERMINATED_CODE
+        and exc.error.message == _SESSION_TERMINATED_MESSAGE
+    )
+
+
 def normalize_server_type(server_type: str) -> str:
     """Normalize server_type to a standard value."""
     if server_type in ["streamable_http", "streamablehttp", "streamable-http"]:
@@ -303,9 +322,11 @@ def get_tool_handler(
 
             try:
                 return await _invoke(session)
-            except ClosedResourceError:
+            except (ClosedResourceError, McpError) as e:
+                if isinstance(e, McpError) and not _is_session_terminated(e):
+                    raise
                 logger.warning(
-                    "Session closed during call to '%s'; attempting reconnect",
+                    "Session closed/terminated during call to '%s'; attempting reconnect",
                     endpoint_name,
                 )
                 session, _ = await session_manager.reconnect()
