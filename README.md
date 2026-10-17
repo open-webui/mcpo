@@ -171,9 +171,11 @@ The dependency constraint keeps this example on the MCP Python SDK 1.x API used 
 
 Replace `top-secret` with your own proxy API key. This key protects mcpo's tool endpoints; it is separate from Parallel authentication and is not sent to Parallel by this configuration.
 
-Open [http://localhost:8000/parallel/docs](http://localhost:8000/parallel/docs) and use **Authorize** with your proxy API key. The OpenAPI schema is at `http://localhost:8000/parallel/openapi.json`. You can also call the tools directly:
+Open [http://localhost:8000/parallel/docs](http://localhost:8000/parallel/docs) and use **Authorize** with your proxy API key. The OpenAPI schema is at `http://localhost:8000/parallel/openapi.json`. To call the tools directly, open a second terminal and set `MCPO_API_KEY` to the same proxy key:
 
 ```bash
+export MCPO_API_KEY="top-secret"
+
 curl http://localhost:8000/parallel/web_search \
   -H "Authorization: Bearer $MCPO_API_KEY" \
   -H 'Content-Type: application/json' \
