@@ -140,6 +140,53 @@ Each tool will be accessible under its own unique route, e.g.:
 
 Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
 
+### 🔎 Web Search and Page Fetching with Parallel
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides free web search and page fetching without a Parallel account or API key. Anonymous searches use Fast mode. The free tier is intended for exploration and light use; see the linked guide for authenticated access and higher rate limits.
+
+Save this as `parallel-config.json`, or add the `parallel` entry to your existing `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "parallel": {
+      "type": "streamable-http",
+      "url": "https://search.parallel.ai/mcp",
+      "headers": {
+        "User-Agent": "mcpo"
+      }
+    }
+  }
+}
+```
+
+Start the proxy:
+
+```bash
+export MCPO_API_KEY="top-secret"
+uvx --with 'mcp>=1.17,<2' mcpo --port 8000 --api-key "$MCPO_API_KEY" --config parallel-config.json
+```
+
+The dependency constraint keeps this example on the MCP Python SDK 1.x API used by mcpo.
+
+Replace `top-secret` with your own proxy API key. This key protects mcpo's tool endpoints; it is separate from Parallel authentication and is not sent to Parallel by this configuration.
+
+Open [http://localhost:8000/parallel/docs](http://localhost:8000/parallel/docs) and use **Authorize** with your proxy API key. The OpenAPI schema is at `http://localhost:8000/parallel/openapi.json`. You can also call the tools directly:
+
+```bash
+curl http://localhost:8000/parallel/web_search \
+  -H "Authorization: Bearer $MCPO_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"objective":"Find the official mcpo setup guide","search_queries":["mcpo Open WebUI setup"]}'
+
+curl http://localhost:8000/parallel/web_fetch \
+  -H "Authorization: Bearer $MCPO_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"urls":["https://github.com/open-webui/mcpo"],"objective":"Find the mcpo installation and configuration steps"}'
+```
+
+Use `web_search` to find relevant pages, then pass the URLs you want to read to `web_fetch`.
+
 ### 🔐 OAuth 2.1 Authentication
 
 mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
