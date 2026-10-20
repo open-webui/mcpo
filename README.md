@@ -140,6 +140,8 @@ Each tool will be accessible under its own unique route, e.g.:
 
 Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
 
+For a complete configuration using a published stdio server, see the [Dreamtune example](examples/dreamtune.md), including environment credentials, strict authentication and schema discovery.
+
 ### 🔐 OAuth 2.1 Authentication
 
 mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
