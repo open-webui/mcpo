@@ -288,7 +288,10 @@ def get_tool_handler(
         session_manager = getattr(request.app.state, "session_manager", None)
 
         async def _invoke(session):
-            return await session.call_tool(endpoint_name, arguments=arguments)
+            operation = session.call_tool(endpoint_name, arguments=arguments)
+            if session_manager:
+                return await session_manager.run_session_operation(operation)
+            return await operation
 
         if session_manager:
             try:
