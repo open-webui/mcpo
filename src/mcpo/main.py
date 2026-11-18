@@ -703,6 +703,9 @@ async def lifespan(app: FastAPI):
                 logger.warning("OAuth not supported for SSE server type")
 
             headers = getattr(app.state, "headers", None)
+            # Kept on app.state so per-request sessions (client header
+            # forwarding) can reuse the same auth provider as the shared one.
+            app.state.auth_provider = auth_provider
             session_manager = MCPConnectionManager(
                 server_type=server_type,
                 command=command,
