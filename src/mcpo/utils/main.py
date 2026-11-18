@@ -1,12 +1,15 @@
 import logging
 import json
 import traceback
+from contextlib import asynccontextmanager
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
 
 from anyio import ClosedResourceError
 from fastapi import HTTPException, Request
 
-from mcp import types
+from mcp import ClientSession, types
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import (
     CallToolResult,
     PARSE_ERROR,
@@ -276,6 +279,55 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
     return model_fields
 
 
+@asynccontextmanager
+async def _per_request_session(request: Request, forwarded_headers: Dict[str, str]):
+    """A short-lived MCP session whose HTTP requests carry `forwarded_headers`.
+
+    The shared session's transport sends the static startup headers on every
+    POST; per-request headers cannot be injected into it. When header
+    forwarding is enabled and the incoming request actually carries forwarded
+    headers, the tool call runs on its own transport instead, so the remote
+    server sees the merged headers on the HTTP layer (initialize and the tool
+    call alike). Costs extra round-trips per call; that is the documented
+    trade for per-request identity. Remote server types only.
+    """
+    server_type = normalize_server_type(getattr(request.app.state, "server_type", ""))
+    url = getattr(request.app.state, "args", [None])[0]
+    static_headers = getattr(request.app.state, "headers", None) or {}
+    merged_headers = {**static_headers, **forwarded_headers}
+    connection_timeout = getattr(request.app.state, "connection_timeout", None)
+    auth_provider = getattr(request.app.state, "auth_provider", None)
+
+    if server_type == "sse":
+        client_context = sse_client(
+            url=url,
+            sse_read_timeout=connection_timeout or 900,
+            headers=merged_headers,
+        )
+    elif server_type == "streamable-http":
+        client_context = streamablehttp_client(
+            url=url,
+            headers=merged_headers,
+            auth=auth_provider,
+        )
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": (
+                    "client_header_forwarding is only supported for remote "
+                    f"server types (sse, streamable-http), not '{server_type}'"
+                )
+            },
+        )
+
+    async with client_context as connection:
+        reader, writer, *_ = connection
+        async with ClientSession(reader, writer) as session:
+            await session.initialize()
+            yield session
+
+
 def get_tool_handler(
     endpoint_name,
     form_model_fields,
@@ -283,8 +335,14 @@ def get_tool_handler(
     client_header_forwarding_config=None,
 ):
     async def call_tool_with_reconnect(
-        request: Request, arguments: Dict[str, Any]
+        request: Request,
+        arguments: Dict[str, Any],
+        forwarded_headers: Optional[Dict[str, str]] = None,
     ) -> CallToolResult:
+        if forwarded_headers:
+            async with _per_request_session(request, forwarded_headers) as session:
+                return await session.call_tool(endpoint_name, arguments=arguments)
+
         session_manager = getattr(request.app.state, "session_manager", None)
 
         async def _invoke(session):
@@ -343,13 +401,11 @@ def get_tool_handler(
                     request, client_header_forwarding_config
                 )
 
-            meta = {}
-            if forwarded_headers:
-                meta["headers"] = forwarded_headers
-
             logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
             try:
-                result = await call_tool_with_reconnect(request, args)
+                result = await call_tool_with_reconnect(
+                    request, args, forwarded_headers
+                )
 
                 if result.isError:
                     error_message = "Unknown tool execution error"
@@ -403,13 +459,9 @@ def get_tool_handler(
                 request, client_header_forwarding_config
             )
 
-        meta = {}
-        if forwarded_headers:
-            meta["headers"] = forwarded_headers
-
         logger.info(f"Calling endpoint: {endpoint_name}, with no args")
         try:
-            result = await call_tool_with_reconnect(request, {})
+            result = await call_tool_with_reconnect(request, {}, forwarded_headers)
 
             if result.isError:
                 error_message = "Unknown tool execution error"
