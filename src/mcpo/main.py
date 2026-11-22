@@ -824,8 +824,6 @@ async def run(
         description=description,
         version=version,
         root_path=root_path,
-        ssl_certfile=ssl_certfile,
-        ssl_keyfile=ssl_keyfile,
         lifespan=lifespan,
     )
 
