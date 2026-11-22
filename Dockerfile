@@ -36,7 +36,7 @@ RUN which mcpo
 EXPOSE 8000
 
 # Entrypoint set for easy container invocation
-ENTRYPOINT ["mcpo"]
+ENTRYPOINT ["mcpo", "--host", "0.0.0.0"]
 
 # Default help CMD (can override at runtime)
 CMD ["--help"]
