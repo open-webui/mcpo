@@ -83,6 +83,7 @@ class FileTokenStorage(TokenStorage):
             storage_dir = os.path.expanduser("~/.mcpo/tokens")
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_dir.chmod(0o700)
         self.token_file = self.storage_dir / f"{safe_name}_tokens.json"
         self.client_file = self.storage_dir / f"{safe_name}_client.json"
         
