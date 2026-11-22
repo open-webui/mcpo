@@ -347,7 +347,8 @@ def get_tool_handler(
             if forwarded_headers:
                 meta["headers"] = forwarded_headers
 
-            logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
+            logger.info("Calling endpoint: %s", endpoint_name)
+            logger.debug("Arguments for %s: %s", endpoint_name, args)
             try:
                 result = await call_tool_with_reconnect(request, args)
 
