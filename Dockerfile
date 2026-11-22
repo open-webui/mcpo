@@ -27,7 +27,7 @@ RUN uv venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install mcpo (assuming pyproject.toml is properly configured)
-RUN uv pip install . && rm -rf ~/.cache
+RUN uv sync --frozen --no-dev && rm -rf ~/.cache
 
 # Verify mcpo installed correctly
 RUN which mcpo
