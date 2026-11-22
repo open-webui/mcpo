@@ -40,6 +40,8 @@ pip install mcpo
 mcpo --port 8000 --api-key "top-secret" -- your_mcp_server_command
 ```
 
+The API key can also be set with the `MCPO_API_KEY` environment variable, which keeps it out of the process list. Setting it with `--env` or `--env-path` has no effect.
+
 To use an SSE-compatible MCP server, simply specify the server type and endpoint:
 
 ```bash

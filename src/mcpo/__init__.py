@@ -24,7 +24,9 @@ def main(
     ] = ["*"],
     api_key: Annotated[
         Optional[str],
-        typer.Option("--api-key", "-k", help="API key for authentication"),
+        typer.Option(
+            "--api-key", "-k", help="API key for authentication", envvar="MCPO_API_KEY"
+        ),
     ] = None,
     strict_auth: Annotated[
         Optional[bool],
