@@ -844,6 +844,8 @@ async def run(
     # Add middleware to protect also documentation and spec
     if api_key and strict_auth:
         main_app.add_middleware(APIKeyMiddleware, api_key=api_key)
+    elif strict_auth:
+        logger.warning("--strict-auth has no effect without --api-key")
 
     headers = kwargs.get("headers")
     if headers and isinstance(headers, str):
