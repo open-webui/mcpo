@@ -365,6 +365,15 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
     for server_name in server_names:
         mount_path = f"{path_prefix}{server_name}"
 
+        routes_to_remove = [
+            route
+            for route in main_app.router.routes
+            if isinstance(route, Mount) and route.path == mount_path
+        ]
+        for route in routes_to_remove:
+            main_app.router.routes.remove(route)
+            logger.info(f"Unmounted server: {server_name}")
+
         # Clean up lifespan context if it exists
         if server_name in active_lifespans:
             lifespan_context = active_lifespans[server_name]
