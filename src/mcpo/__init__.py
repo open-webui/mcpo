@@ -14,7 +14,7 @@ app = typer.Typer()
 def main(
     host: Annotated[
         Optional[str], typer.Option("--host", "-h", help="Host address")
-    ] = "0.0.0.0",
+    ] = "127.0.0.1",
     port: Annotated[
         Optional[int], typer.Option("--port", "-p", help="Port number")
     ] = 8000,
