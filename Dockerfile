@@ -32,6 +32,10 @@ RUN uv pip install . && rm -rf ~/.cache
 # Verify mcpo installed correctly
 RUN which mcpo
 
+# Run as an unprivileged user
+RUN useradd --create-home --uid 1000 mcpo && install -d -o mcpo -g mcpo /home/mcpo/.mcpo
+USER 1000
+
 # Expose port (optional but common default)
 EXPOSE 8000
 
