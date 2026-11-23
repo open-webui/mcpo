@@ -123,6 +123,7 @@ def _process_schema_property(
     prop_name: str,
     is_required: bool,
     schema_defs: Optional[Dict] = None,
+    resolving_refs: tuple[str, ...] = (),
 ) -> tuple[Union[Type, List, ForwardRef, Any], FieldInfo]:
     """
     Recursively processes a schema property to determine its Python type hint
@@ -147,6 +148,9 @@ def _process_schema_property(
             if prefix_path.startswith(ref_path):
                 # TODO: Find the exact type hint for the $ref.
                 return Any, Field(default=None, description="")
+        if ref in resolving_refs:
+            return Any, Field(default=None, description="")
+        resolving_refs += (ref,)
         prop_schema = schema_defs
         for part in ref.removeprefix("#/").split("/"):
             if isinstance(prop_schema, list):
@@ -171,6 +175,7 @@ def _process_schema_property(
                 f"choice_{i}",
                 False,
                 schema_defs=schema_defs,
+                resolving_refs=resolving_refs,
             )
             type_hints.append(type_hint)
         return Union[tuple(type_hints)], pydantic_field
@@ -190,6 +195,7 @@ def _process_schema_property(
                 prop_name,
                 False,
                 schema_defs=schema_defs,
+                resolving_refs=resolving_refs,
             )
             type_hints.append(type_hint)
 
@@ -217,6 +223,7 @@ def _process_schema_property(
                 name,
                 is_nested_required,
                 schema_defs,
+                resolving_refs,
             )
 
             if name_needs_alias(name):
@@ -255,6 +262,7 @@ def _process_schema_property(
             "item",
             False,  # Items aren't required at this level,
             schema_defs,
+            resolving_refs,
         )
         list_type_hint = List[item_type_hint]
         return list_type_hint, pydantic_field
