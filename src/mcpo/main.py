@@ -972,10 +972,10 @@ async def run(
             shutdown_handler.shutdown_event.set()
 
         # Cancel the other task
-        for task in pending:
-            task.cancel()
+        if shutdown_wait_task in pending:
+            shutdown_wait_task.cancel()
             try:
-                await task
+                await shutdown_wait_task
             except asyncio.CancelledError:
                 pass
 
@@ -984,9 +984,10 @@ async def run(
         server.should_exit = True
 
         # Cancel all tracked tasks
-        for task in list(shutdown_handler.tasks):
-            if not task.done():
-                task.cancel()
+        if not server.started:
+            for task in list(shutdown_handler.tasks):
+                if not task.done():
+                    task.cancel()
 
         # Wait for all tasks to complete
         if shutdown_handler.tasks:
