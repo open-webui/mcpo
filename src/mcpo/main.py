@@ -952,7 +952,7 @@ async def run(
         logger.info(f"Enabling hot reload for config file: {config_path}")
 
         async def reload_callback(new_config):
-            await reload_config_handler(main_app, new_config)
+            await reload_config_handler(main_app, load_config(config_path))
 
         config_watcher = ConfigWatcher(config_path, reload_callback)
         config_watcher.start()
