@@ -653,6 +653,8 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Initiating connection for server: '{server_name}'...")
                 try:
                     await stack.enter_async_context(lifespan_context)
+                    # Hot reload may stop it first, exiting it again is harmless
+                    app.state.active_lifespans[server_name] = lifespan_context
                     is_connected = getattr(sub_app.state, "is_connected", False)
                     if is_connected:
                         logger.info(f"Successfully connected to '{server_name}'.")
@@ -943,6 +945,7 @@ async def run(
         main_app.state.connection_timeout = connection_timeout
         main_app.state.lifespan = lifespan
         main_app.state.path_prefix = path_prefix
+        main_app.state.active_lifespans = {}
     else:
         logger.error("MCPO server_command or config_path must be provided.")
         raise ValueError("You must provide either server_command or config.")
