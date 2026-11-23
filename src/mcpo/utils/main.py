@@ -148,7 +148,8 @@ def _process_schema_property(
             if prefix_path.startswith(ref_path):
                 # TODO: Find the exact type hint for the $ref.
                 return Any, Field(default=None, description="")
-        if ref in resolving_refs:
+        # "#" is the root schema, which is always being resolved
+        if ref == "#" or ref in resolving_refs:
             return Any, Field(default=None, description="")
         resolving_refs += (ref,)
         prop_schema = schema_defs
