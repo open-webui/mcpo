@@ -408,22 +408,14 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
             main_app.router.routes.remove(route)
             logger.info(f"Unmounted server: {server_name}")
 
-        # Clean up lifespan context if it exists
-        if server_name in active_lifespans:
-            lifespan_context = active_lifespans[server_name]
-            try:
-                # Schedule cleanup of the lifespan context
-                asyncio.create_task(lifespan_context.__aexit__(None, None, None))
-            except Exception as e:
-                logger.warning(f"Error cleaning up lifespan for {server_name}: {e}")
-            finally:
-                del active_lifespans[server_name]
+        active_lifespans.pop(server_name, None)
 
 
 async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, Any]):
     """Handle config reload by comparing and updating mounted servers."""
     old_config_data = getattr(main_app.state, "config_data", {})
     backup_routes = list(main_app.router.routes)  # Backup current routes for rollback
+    backup_lifespans = dict(getattr(main_app.state, "active_lifespans", {}))
 
     try:
         old_servers = set(old_config_data.get("mcpServers", {}).keys())
@@ -526,11 +518,20 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         main_app.state.config_data = new_config_data
         logger.info("Config reload completed successfully")
 
-    except Exception as e:
+    except (Exception, asyncio.CancelledError) as e:
         logger.error(f"Error during config reload, keeping previous configuration: {e}")
         # Ensure we're back to the original state
         main_app.router.routes = backup_routes
+        current_lifespans = getattr(main_app.state, "active_lifespans", {})
+        main_app.state.active_lifespans = backup_lifespans
+        for server_name, lifespan_context in list(current_lifespans.items()):
+            if backup_lifespans.get(server_name) is not lifespan_context:
+                await lifespan_context.__aexit__(None, None, None)
         raise
+
+    for server_name in servers_to_remove | set(servers_to_update):
+        if server_name in backup_lifespans:
+            await backup_lifespans[server_name].__aexit__(None, None, None)
 
 
 async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
