@@ -133,7 +133,7 @@ def _process_schema_property(
         A tuple containing (python_type_hint, pydantic_field).
         The pydantic_field contains default value and description.
     """
-    if "$ref" in prop_schema:
+    if isinstance(prop_schema, dict) and "$ref" in prop_schema:
         ref = prop_schema["$ref"]
         if ref.startswith("#/properties/"):
             # Remove common prefix in pathes.
@@ -156,6 +156,9 @@ def _process_schema_property(
             if isinstance(prop_schema, list):
                 part = int(part)
             prop_schema = prop_schema[part]
+
+    if isinstance(prop_schema, bool):
+        prop_schema = {}
 
     prop_type = prop_schema.get("type")
     prop_desc = prop_schema.get("description", "")
