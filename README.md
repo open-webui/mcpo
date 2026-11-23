@@ -58,6 +58,8 @@ To use a Streamable HTTP-compatible MCP server, specify the server type and endp
 
 ```bash
 mcpo --port 8000 --api-key "top-secret" --server-type "streamable-http" -- http://127.0.0.1:8002/mcp
+# Public example — Lantern Works, hosted, free, no-key GPU rental prices (--api-key is mcpo's own front-door auth):
+mcpo --port 8000 --api-key "top-secret" --server-type "streamable-http" -- https://lantern-works-mcp.lantern-works.workers.dev/mcp?ref=mcpo
 ```
 
 You can also run mcpo via Docker with no installation:
