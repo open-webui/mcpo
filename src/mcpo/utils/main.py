@@ -56,9 +56,18 @@ def process_tool_response(result: CallToolResult) -> list:
         elif isinstance(content, types.ImageContent):
             image_data = f"data:{content.mimeType};base64,{content.data}"
             response.append(image_data)
+        elif isinstance(content, types.AudioContent):
+            audio_data = f"data:{content.mimeType};base64,{content.data}"
+            response.append(audio_data)
+        elif isinstance(content, types.ResourceLink):
+            response.append(str(content.uri))
         elif isinstance(content, types.EmbeddedResource):
-            # TODO: Handle embedded resources
-            response.append("Embedded resource not supported yet.")
+            resource = content.resource
+            if isinstance(resource, types.TextResourceContents):
+                response.append(resource.text)
+            else:
+                mime_type = resource.mimeType or "application/octet-stream"
+                response.append(f"data:{mime_type};base64,{resource.blob}")
     return response
 
 
