@@ -222,7 +222,7 @@ def _process_schema_property(
 
     elif prop_type == "array":
         items_schema = prop_schema.get("items")
-        if not items_schema:
+        if not isinstance(items_schema, dict):
             # Default to list of anything if items schema is missing
             return List[Any], pydantic_field
 
