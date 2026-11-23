@@ -14,7 +14,12 @@ SESSION_TERMINATED_CODE = 32600
 from mcpo.utils.main import get_tool_handler
 
 
+async def _run_operation(operation):
+    return await operation
+
+
 def _make_request(session_manager):
+    session_manager.run_session_operation = _run_operation
     return SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(session_manager=session_manager))
     )
