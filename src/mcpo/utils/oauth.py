@@ -254,6 +254,12 @@ async def create_oauth_provider(
     else:
         storage = FileTokenStorage(server_name)
     
+    # A configured client_id is a pre-registered client
+    if metadata_dict.get("client_id"):
+        await storage.set_client_info(
+            OAuthClientInformationFull.model_validate(metadata_dict)
+        )
+
     # Setup callback handling
     use_loopback = oauth_config.get("use_loopback", True)
     callback_port = oauth_config.get("callback_port", 3030)
