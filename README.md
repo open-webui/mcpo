@@ -169,7 +169,7 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. The impl
 - `use_loopback`: Auto-open browser for auth (default: true)
 
 **Advanced Options (rarely needed):**
-For servers that don't support dynamic client registration, you can specify static client metadata:
+For servers that don't support dynamic client registration, register a client with the provider and put its client ID and secret into the client metadata:
 
 ```json
 {
@@ -180,6 +180,8 @@ For servers that don't support dynamic client registration, you can specify stat
       "oauth": {
         "server_url": "http://api.example.com",
         "client_metadata": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret",
           "client_name": "My MCPO Client",
           "redirect_uris": ["http://localhost:3030/callback"]
         }
@@ -192,7 +194,7 @@ For servers that don't support dynamic client registration, you can specify stat
 > **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
 
 On first connection, mcpo will:
-1. Perform dynamic client registration (if supported)
+1. Perform dynamic client registration (if supported and no `client_id` is configured)
 2. Open your browser for authorization
 3. Capture the OAuth callback automatically  
 4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
