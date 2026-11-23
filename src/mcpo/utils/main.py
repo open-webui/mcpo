@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
+from typing import Any, Dict, ForwardRef, List, Literal, Optional, Type, Union
 
 from anyio import ClosedResourceError
 from fastapi import HTTPException, Request
@@ -166,6 +166,12 @@ def _process_schema_property(
 
     default_value = ... if is_required else prop_schema.get("default", None)
     pydantic_field = Field(default=default_value, description=prop_desc)
+
+    if "const" in prop_schema:
+        return Literal[prop_schema["const"]], pydantic_field
+
+    if prop_schema.get("enum"):
+        return Literal[tuple(prop_schema["enum"])], pydantic_field
 
     # Handle the case where prop_type is missing but 'anyOf' key exists
     # In this case, use data type from 'anyOf' to determine the type hint
