@@ -547,7 +547,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             f"{endpoint_name}_form_model",
             inputSchema.get("properties", {}),
             inputSchema.get("required", []),
-            inputSchema.get("$defs", {}),
+            inputSchema,
         )
 
         response_model_fields = None
@@ -556,7 +556,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
                 f"{endpoint_name}_response_model",
                 outputSchema.get("properties", {}),
                 outputSchema.get("required", []),
-                outputSchema.get("$defs", {}),
+                outputSchema,
             )
 
         # Get client header forwarding configuration from app state

@@ -128,9 +128,11 @@ def _process_schema_property(
             if prefix_path.startswith(ref_path):
                 # TODO: Find the exact type hint for the $ref.
                 return Any, Field(default=None, description="")
-        ref = ref.split("/")[-1]
-        assert ref in schema_defs, "Custom field not found"
-        prop_schema = schema_defs[ref]
+        prop_schema = schema_defs
+        for part in ref.removeprefix("#/").split("/"):
+            if isinstance(prop_schema, list):
+                part = int(part)
+            prop_schema = prop_schema[part]
 
     prop_type = prop_schema.get("type")
     prop_desc = prop_schema.get("description", "")
