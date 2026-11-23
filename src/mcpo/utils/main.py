@@ -381,6 +381,8 @@ def get_tool_handler(
                 )
                 return final_response
 
+            except HTTPException:
+                raise
             except McpError as e:
                 logger.info(
                     f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
@@ -436,6 +438,8 @@ def get_tool_handler(
             )
             return final_response
 
+        except HTTPException:
+            raise
         except McpError as e:
             logger.info(
                 f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
