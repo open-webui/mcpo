@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import uvicorn
+from anyio import ClosedResourceError
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import Mount
@@ -79,7 +80,8 @@ class MCPConnectionManager:
         self.auth_provider = auth_provider
 
         self._session: Optional[ClientSession] = None
-        self._client_context = None
+        self._connection_task = None
+        self._stop_connection = None
         self._lock = asyncio.Lock()
         self._initialize_lock = asyncio.Lock()
         self._initialize_result = None
@@ -91,6 +93,8 @@ class MCPConnectionManager:
 
     async def get_session(self) -> ClientSession:
         async with self._lock:
+            if self._connection_task is not None and self._connection_task.done():
+                await self._close_session_locked()
             if self._session is None:
                 await self._open_session_locked()
             return self._session
@@ -102,7 +106,7 @@ class MCPConnectionManager:
 
         async with self._initialize_lock:
             if not self._initialized or self._initialize_result is None:
-                initialize_result = await session.initialize()
+                initialize_result = await self.run_session_operation(session.initialize())
                 self._initialize_result = initialize_result
                 self._initialized = True
             else:
@@ -122,45 +126,69 @@ class MCPConnectionManager:
             await self._close_session_locked()
 
     async def _open_session_locked(self):
-        client_context = self._create_client_context()
+        ready = asyncio.get_running_loop().create_future()
+        self._stop_connection = asyncio.Event()
+        self._connection_task = asyncio.create_task(
+            self._run_connection(ready, self._stop_connection)
+        )
         try:
-            connection = await client_context.__aenter__()
-        except Exception:
-            # Ensure the context is closed if entering fails
-            with contextlib.suppress(Exception):
-                await client_context.__aexit__(None, None, None)
+            self._session = await asyncio.shield(ready)
+        except BaseException:
+            if not ready.done():
+                self._connection_task.cancel()
+            await self._close_session_locked()
             raise
-
-        reader, writer, *_ = connection
-        session = ClientSession(reader, writer)
-        try:
-            await session.__aenter__()
-        except Exception:
-            with contextlib.suppress(Exception):
-                await session.__aexit__(None, None, None)
-            with contextlib.suppress(Exception):
-                await client_context.__aexit__(None, None, None)
-            raise
-
-        self._client_context = client_context
-        self._session = session
         self._initialized = False
         self._initialize_result = None
+
+    async def _run_connection(self, ready, stop):
+        # AnyIO transport/session cancel scopes must enter and exit in one task.
+        try:
+            async with self._create_client_context() as connection:
+                reader, writer, *_ = connection
+                async with ClientSession(reader, writer) as session:
+                    ready.set_result(session)
+                    await stop.wait()
+        except asyncio.CancelledError:
+            if not ready.done():
+                ready.cancel()
+            raise
+        except Exception as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            else:
+                logger.warning("MCP connection closed with an error", exc_info=True)
+
+    async def run_session_operation(self, operation):
+        connection_task = self._connection_task
+        operation_task = asyncio.create_task(operation)
+        try:
+            if connection_task is None:
+                raise ClosedResourceError("MCP connection is closed")
+            await asyncio.wait(
+                (operation_task, connection_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if operation_task.done():
+                return await operation_task
+            raise ClosedResourceError("MCP connection closed during request")
+        finally:
+            if not operation_task.done():
+                operation_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await operation_task
 
     async def _close_session_locked(self):
-        session, client_context = self._session, self._client_context
+        task, stop = self._connection_task, self._stop_connection
         self._session = None
-        self._client_context = None
+        self._connection_task = None
+        self._stop_connection = None
         self._initialized = False
         self._initialize_result = None
 
-        if session is not None:
-            with contextlib.suppress(Exception):
-                await session.__aexit__(None, None, None)
-
-        if client_context is not None:
-            with contextlib.suppress(Exception):
-                await client_context.__aexit__(None, None, None)
+        if task is not None:
+            stop.set()
+            await task
 
     def _create_client_context(self):
         if self.server_type == "stdio":
@@ -365,6 +393,15 @@ def unmount_servers(main_app: FastAPI, path_prefix: str, server_names: list):
     for server_name in server_names:
         mount_path = f"{path_prefix}{server_name}"
 
+        routes_to_remove = [
+            route
+            for route in main_app.router.routes
+            if isinstance(route, Mount) and route.path == mount_path
+        ]
+        for route in routes_to_remove:
+            main_app.router.routes.remove(route)
+            logger.info(f"Unmounted server: {server_name}")
+
         # Clean up lifespan context if it exists
         if server_name in active_lifespans:
             lifespan_context = active_lifespans[server_name]
@@ -515,7 +552,10 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
     if instructions:
         app.description = instructions
 
-    tools_result = await session.list_tools()
+    if session_manager:
+        tools_result = await session_manager.run_session_operation(session.list_tools())
+    else:
+        tools_result = await session.list_tools()
     tools = tools_result.tools
     
     # Filter out disabled tools
@@ -538,7 +578,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             f"{endpoint_name}_form_model",
             inputSchema.get("properties", {}),
             inputSchema.get("required", []),
-            inputSchema.get("$defs", {}),
+            inputSchema,
         )
 
         response_model_fields = None
@@ -547,7 +587,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
                 f"{endpoint_name}_response_model",
                 outputSchema.get("properties", {}),
                 outputSchema.get("required", []),
-                outputSchema.get("$defs", {}),
+                outputSchema,
             )
 
         # Get client header forwarding configuration from app state
@@ -815,8 +855,6 @@ async def run(
         description=description,
         version=version,
         root_path=root_path,
-        ssl_certfile=ssl_certfile,
-        ssl_keyfile=ssl_keyfile,
         lifespan=lifespan,
     )
 
@@ -835,6 +873,8 @@ async def run(
     # Add middleware to protect also documentation and spec
     if api_key and strict_auth:
         main_app.add_middleware(APIKeyMiddleware, api_key=api_key)
+    elif strict_auth:
+        logger.warning("--strict-auth has no effect without --api-key")
 
     headers = kwargs.get("headers")
     if headers and isinstance(headers, str):
@@ -963,10 +1003,10 @@ async def run(
             shutdown_handler.shutdown_event.set()
 
         # Cancel the other task
-        for task in pending:
-            task.cancel()
+        if shutdown_wait_task in pending:
+            shutdown_wait_task.cancel()
             try:
-                await task
+                await shutdown_wait_task
             except asyncio.CancelledError:
                 pass
 
@@ -975,9 +1015,10 @@ async def run(
         server.should_exit = True
 
         # Cancel all tracked tasks
-        for task in list(shutdown_handler.tasks):
-            if not task.done():
-                task.cancel()
+        if not server.started:
+            for task in list(shutdown_handler.tasks):
+                if not task.done():
+                    task.cancel()
 
         # Wait for all tasks to complete
         if shutdown_handler.tasks:

@@ -8,6 +8,7 @@ from pathlib import Path
 import webbrowser
 import time
 import threading
+from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -83,6 +84,7 @@ class FileTokenStorage(TokenStorage):
             storage_dir = os.path.expanduser("~/.mcpo/tokens")
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_dir.chmod(0o700)
         self.token_file = self.storage_dir / f"{safe_name}_tokens.json"
         self.client_file = self.storage_dir / f"{safe_name}_client.json"
         
@@ -147,7 +149,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode('utf-8'))
             
         elif "error" in q:
-            error_desc = q.get("error_description", [q["error"][0]])[0]
+            error_desc = escape(q.get("error_description", [q["error"][0]])[0])
             self.data["error"] = q["error"][0]
             self.send_response(400)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -252,6 +254,12 @@ async def create_oauth_provider(
     else:
         storage = FileTokenStorage(server_name)
     
+    # A configured client_id is a pre-registered client
+    if metadata_dict.get("client_id"):
+        await storage.set_client_info(
+            OAuthClientInformationFull.model_validate(metadata_dict)
+        )
+
     # Setup callback handling
     use_loopback = oauth_config.get("use_loopback", True)
     callback_port = oauth_config.get("callback_port", 3030)

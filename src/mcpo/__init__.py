@@ -14,7 +14,7 @@ app = typer.Typer()
 def main(
     host: Annotated[
         Optional[str], typer.Option("--host", "-h", help="Host address")
-    ] = "0.0.0.0",
+    ] = "127.0.0.1",
     port: Annotated[
         Optional[int], typer.Option("--port", "-p", help="Port number")
     ] = 8000,
@@ -24,7 +24,9 @@ def main(
     ] = ["*"],
     api_key: Annotated[
         Optional[str],
-        typer.Option("--api-key", "-k", help="API key for authentication"),
+        typer.Option(
+            "--api-key", "-k", help="API key for authentication", envvar="MCPO_API_KEY"
+        ),
     ] = None,
     strict_auth: Annotated[
         Optional[bool],
