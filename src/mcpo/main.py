@@ -67,6 +67,7 @@ class MCPConnectionManager:
         command: Optional[str],
         args: List[str],
         env: Dict[str, str],
+        cwd: Optional[str] = None,
         headers: Optional[Dict[str, str]],
         connection_timeout: Optional[int],
         auth_provider: Optional[Any] = None,
@@ -75,6 +76,7 @@ class MCPConnectionManager:
         self.command = command
         self.args = args
         self.env = env
+        self.cwd = cwd
         self.headers = headers
         self.connection_timeout = connection_timeout
         self.auth_provider = auth_provider
@@ -196,6 +198,7 @@ class MCPConnectionManager:
                 command=self.command,
                 args=self.args,
                 env={**os.environ, **self.env},
+                cwd=self.cwd,
             )
             return stdio_client(server_params)
         if self.server_type == "sse":
@@ -229,6 +232,8 @@ def validate_server_config(server_name: str, server_cfg: Dict[str, Any]) -> None
             raise ValueError(f"Server '{server_name}' 'command' must be a string")
         if server_cfg.get("args") and not isinstance(server_cfg["args"], list):
             raise ValueError(f"Server '{server_name}' 'args' must be a list")
+        if server_cfg.get("cwd") is not None and not isinstance(server_cfg["cwd"], str):
+            raise ValueError(f"Server '{server_name}' 'cwd' must be a string")
     elif server_cfg.get("url") and not server_type:
         # Fallback for old SSE config without explicit type
         pass
@@ -312,6 +317,7 @@ def create_sub_app(
         sub_app.state.command = server_cfg["command"]
         sub_app.state.args = server_cfg.get("args", [])
         sub_app.state.env = {**os.environ, **server_cfg.get("env", {})}
+        sub_app.state.cwd = server_cfg.get("cwd")
 
     server_config_type = server_cfg.get("type")
     if server_config_type == "sse" and server_cfg.get("url"):
@@ -618,6 +624,7 @@ async def lifespan(app: FastAPI):
     args = getattr(app.state, "args", [])
     args = args if isinstance(args, list) else [args]
     env = getattr(app.state, "env", {})
+    cwd = getattr(app.state, "cwd", None)
     connection_timeout = getattr(app.state, "connection_timeout", CONNECTION_TIMEOUT)
     api_dependency = getattr(app.state, "api_dependency", None)
     path_prefix = getattr(app.state, "path_prefix", "/")
@@ -748,6 +755,7 @@ async def lifespan(app: FastAPI):
                 command=command,
                 args=args,
                 env=env,
+                cwd=cwd,
                 headers=headers,
                 connection_timeout=connection_timeout,
                 auth_provider=auth_provider,

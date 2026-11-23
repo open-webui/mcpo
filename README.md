@@ -136,6 +136,8 @@ Example config.json:
 }
 ```
 
+A local server can also set `cwd` to the folder it should start in.
+
 Each tool will be accessible under its own unique route, e.g.:
 - http://localhost:8000/memory
 - http://localhost:8000/time
