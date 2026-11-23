@@ -1,7 +1,12 @@
-import pytest
-from pydantic import BaseModel, Field
+from types import SimpleNamespace
 from typing import Any, List, Dict, Union
+from unittest.mock import AsyncMock
 
+import pytest
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+from mcpo.main import create_dynamic_endpoints
 from mcpo.utils.main import _process_schema_property
 
 
@@ -13,6 +18,34 @@ def clear_model_cache():
     _model_cache.clear()
     yield
     _model_cache.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("preserve_tool_names", "expected"),
+    [(False, "tool_firecrawl_search_post"), (True, "firecrawl_search")],
+)
+async def test_operation_id(preserve_tool_names, expected):
+    app = FastAPI()
+    app.state.preserve_tool_names = preserve_tool_names
+    app.state.session = AsyncMock()
+    app.state.session.initialize.return_value = SimpleNamespace(
+        serverInfo=None, instructions=None
+    )
+    app.state.session.list_tools.return_value = SimpleNamespace(
+        tools=[
+            SimpleNamespace(
+                name="firecrawl_search",
+                description="Search the web",
+                inputSchema={"type": "object", "properties": {}},
+                outputSchema=None,
+            )
+        ]
+    )
+
+    await create_dynamic_endpoints(app)
+
+    assert app.openapi()["paths"]["/firecrawl_search"]["post"]["operationId"] == expected
 
 
 def test_process_simple_string_required():
