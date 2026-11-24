@@ -18,7 +18,7 @@ from mcp.types import (
 
 from mcp.shared.exceptions import McpError
 
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
 
 from mcpo.utils.headers import process_headers_for_server
@@ -324,6 +324,35 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
     return model_fields
 
 
+def _unset_none_fields(model: BaseModel) -> Dict[Any, Any]:
+    """Return a model_dump exclude spec for fields left at a None default.
+
+    Only fields the request did not set are dropped. An explicit null stays:
+    the schema allows it, and the server may handle it differently from a
+    missing argument.
+    """
+    exclude: Dict[Any, Any] = {}
+    for name in type(model).model_fields:
+        value = getattr(model, name)
+        if value is None:
+            if name not in model.model_fields_set:
+                exclude[name] = True
+        elif isinstance(value, BaseModel):
+            nested = _unset_none_fields(value)
+            if nested:
+                exclude[name] = nested
+        elif isinstance(value, (list, tuple)):
+            items = {
+                index: _unset_none_fields(item)
+                for index, item in enumerate(value)
+                if isinstance(item, BaseModel)
+            }
+            items = {index: spec for index, spec in items.items() if spec}
+            if items:
+                exclude[name] = items
+    return exclude
+
+
 def get_tool_handler(
     endpoint_name,
     form_model_fields,
@@ -385,7 +414,9 @@ def get_tool_handler(
         async def tool(
             form_data: FormModel, request: Request
         ) -> Union[ResponseModel, Any]:
-            args = form_data.model_dump(exclude_none=True, by_alias=True)
+            args = form_data.model_dump(
+                by_alias=True, exclude=_unset_none_fields(form_data)
+            )
 
             forwarded_headers = {}
             if (
