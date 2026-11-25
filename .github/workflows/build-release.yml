@@ -31,17 +31,22 @@ jobs:
               id: changelog
               run: |
                   CHANGELOG_CONTENT=$(awk 'BEGIN {print_section=0;} /^## \[/ {if (print_section == 0) {print_section=1;} else {exit;}} print_section {print;}' CHANGELOG.md)
-                  CHANGELOG_ESCAPED=$(echo "$CHANGELOG_CONTENT" | sed ':a;N;$!ba;s/\n/%0A/g')
                   echo "Extracted latest release notes from CHANGELOG.md:" 
                   echo -e "$CHANGELOG_CONTENT" 
-                  echo "content=$CHANGELOG_ESCAPED" >> "$GITHUB_OUTPUT"
+                  {
+                    echo "content<<CHANGELOG_EOF"
+                    echo "$CHANGELOG_CONTENT"
+                    echo "CHANGELOG_EOF"
+                  } >> "$GITHUB_OUTPUT"
 
             - name: Create GitHub release
               uses: actions/github-script@v7
+              env:
+                  CHANGELOG: ${{ steps.changelog.outputs.content }}
               with:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   script: |
-                      const changelog = `${{ steps.changelog.outputs.content }}`;
+                      const changelog = process.env.CHANGELOG;
                       const release = await github.rest.repos.createRelease({
                         owner: context.repo.owner,
                         repo: context.repo.repo,
