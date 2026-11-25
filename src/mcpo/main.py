@@ -526,12 +526,24 @@ async def reload_config_handler(main_app: FastAPI, new_config_data: Dict[str, An
         main_app.state.active_lifespans = backup_lifespans
         for server_name, lifespan_context in list(current_lifespans.items()):
             if backup_lifespans.get(server_name) is not lifespan_context:
-                await lifespan_context.__aexit__(None, None, None)
+                try:
+                    await lifespan_context.__aexit__(None, None, None)
+                except Exception:
+                    logger.error(
+                        f"Error cleaning up server '{server_name}' during rollback",
+                        exc_info=True,
+                    )
         raise
 
     for server_name in servers_to_remove | set(servers_to_update):
         if server_name in backup_lifespans:
-            await backup_lifespans[server_name].__aexit__(None, None, None)
+            try:
+                await backup_lifespans[server_name].__aexit__(None, None, None)
+            except Exception:
+                logger.error(
+                    f"Error shutting down server '{server_name}' after reload",
+                    exc_info=True,
+                )
 
 
 async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
@@ -638,6 +650,9 @@ async def lifespan(app: FastAPI):
     )
 
     if is_main_app:
+        if not hasattr(app.state, "active_lifespans"):
+            app.state.active_lifespans = {}
+        startup_lifespans = []
         async with AsyncExitStack() as stack:
             successful_servers = []
             failed_servers = []
@@ -653,6 +668,7 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Initiating connection for server: '{server_name}'...")
                 try:
                     await stack.enter_async_context(lifespan_context)
+                    startup_lifespans.append(lifespan_context)
                     # Hot reload may stop it first, exiting it again is harmless
                     app.state.active_lifespans[server_name] = lifespan_context
                     is_connected = getattr(sub_app.state, "is_connected", False)
@@ -720,8 +736,29 @@ async def lifespan(app: FastAPI):
             if not successful_servers:
                 logger.error("No MCP servers could be reached.")
 
-            yield
-            # The AsyncExitStack will handle the graceful shutdown of all servers
+            try:
+                yield
+            finally:
+                # Close servers added or updated by hot reload (not registered with stack).
+                active_lifespans = getattr(app.state, "active_lifespans", None)
+                if active_lifespans:
+                    for server_name, lifespan_context in reversed(
+                        list(active_lifespans.items())
+                    ):
+                        active_lifespans.pop(server_name, None)
+                        if any(
+                            lifespan_context is existing
+                            for existing in startup_lifespans
+                        ):
+                            continue
+                        try:
+                            await lifespan_context.__aexit__(None, None, None)
+                        except Exception:
+                            logger.error(
+                                f"Error shutting down server '{server_name}'",
+                                exc_info=True,
+                            )
+            # The AsyncExitStack will handle the graceful shutdown of startup servers
             # when the 'with' block is exited.
     else:
         # This is a sub-app's lifespan

@@ -1,12 +1,21 @@
 import os
 import json
+import sys
 import tempfile
 import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI
+from starlette.routing import Mount
 
-from mcpo.main import load_config, validate_server_config, reload_config_handler
+from mcpo.main import (
+    lifespan,
+    load_config,
+    mount_config_servers,
+    reload_config_handler,
+    validate_server_config,
+)
 
 
 def test_validate_server_config_stdio():
@@ -155,3 +164,144 @@ def test_config_watcher_initialization():
         assert watcher.reload_callback == callback
     finally:
         os.unlink(config_path)
+
+
+def _make_main_app(initial_config, sub_lifespan):
+    main_app = FastAPI(lifespan=lifespan)
+    main_app.state.config_data = initial_config
+    main_app.state.cors_allow_origins = ["*"]
+    main_app.state.api_key = None
+    main_app.state.strict_auth = False
+    main_app.state.api_dependency = None
+    main_app.state.connection_timeout = None
+    main_app.state.lifespan = sub_lifespan
+    main_app.state.path_prefix = "/"
+    main_app.state.active_lifespans = {}
+    mount_config_servers(
+        main_app,
+        initial_config,
+        ["*"],
+        None,
+        False,
+        None,
+        None,
+        sub_lifespan,
+        "/",
+    )
+    return main_app
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_hot_reloaded_servers_without_double_closing_startup_servers():
+    """Shutdown must close servers added or updated by hot reload without double-closing startup servers."""
+    exited = []
+
+    class TrackingLifespan:
+        def __init__(self, sub_app):
+            self.key = (sub_app.title, tuple(getattr(sub_app.state, "args", [])))
+            self.sub_app = sub_app
+
+        async def __aenter__(self):
+            self.sub_app.state.is_connected = True
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            exited.append(self.key)
+
+    cfg1 = {
+        "mcpServers": {
+            "unchanged": {"command": "echo", "args": ["v1"]},
+            "updated": {"command": "echo", "args": ["v1"]},
+        }
+    }
+    main_app = _make_main_app(cfg1, TrackingLifespan)
+
+    async with lifespan(main_app):
+        cfg2 = {
+            "mcpServers": {
+                "unchanged": {"command": "echo", "args": ["v1"]},
+                "updated": {"command": "echo", "args": ["v2"]},
+                "added": {"command": "echo", "args": ["v1"]},
+            }
+        }
+        await reload_config_handler(main_app, cfg2)
+        assert exited == [("updated", ("v1",))]
+
+    assert exited.count(("unchanged", ("v1",))) == 1
+    assert exited.count(("updated", ("v2",))) == 1
+    assert exited.count(("added", ("v1",))) == 1
+    assert main_app.state.active_lifespans == {}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_remaining_hot_reloaded_servers_when_one_fails_to_exit():
+    """An error closing one hot-reloaded server on shutdown must not leak other servers."""
+    exited = []
+
+    @asynccontextmanager
+    async def flaky_sub_lifespan(sub_app):
+        name = sub_app.title
+        sub_app.state.is_connected = True
+        try:
+            yield
+        finally:
+            exited.append(name)
+            if name == "broken":
+                raise RuntimeError("boom during shutdown")
+
+    cfg1 = {"mcpServers": {"startup": {"command": "echo", "args": ["1"]}}}
+    main_app = _make_main_app(cfg1, flaky_sub_lifespan)
+
+    async with lifespan(main_app):
+        cfg2 = {
+            "mcpServers": {
+                "startup": {"command": "echo", "args": ["1"]},
+                "healthy": {"command": "echo", "args": ["2"]},
+                "broken": {"command": "echo", "args": ["3"]},
+            }
+        }
+        await reload_config_handler(main_app, cfg2)
+
+    assert set(exited) == {"startup", "healthy", "broken"}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_real_stdio_server_added_by_hot_reload():
+    """A real stdio MCP server added during hot reload is closed when the proxy shuts down."""
+    server_code = """
+from mcp.server.fastmcp import FastMCP
+mcp = FastMCP("hot-reload-shutdown-test")
+@mcp.tool()
+def ping() -> str:
+    return "pong"
+mcp.run()
+"""
+    cfg1 = {
+        "mcpServers": {
+            "startup": {"command": sys.executable, "args": ["-c", server_code]}
+        }
+    }
+    main_app = _make_main_app(cfg1, lifespan)
+
+    async with lifespan(main_app):
+        cfg2 = {
+            "mcpServers": {
+                "startup": {"command": sys.executable, "args": ["-c", server_code]},
+                "reloaded": {"command": sys.executable, "args": ["-c", server_code]},
+            }
+        }
+        await asyncio.wait_for(reload_config_handler(main_app, cfg2), timeout=20)
+        reloaded_apps = [
+            route.app
+            for route in main_app.routes
+            if isinstance(route, Mount) and route.path == "/reloaded"
+        ]
+        assert len(reloaded_apps) == 1
+        reloaded_app = reloaded_apps[0]
+        assert reloaded_app.state.is_connected is True
+        assert reloaded_app.state.session_manager is not None
+        assert reloaded_app.state.session_manager.current_session is not None
+
+    assert reloaded_app.state.session_manager is None
+    assert reloaded_app.state.session is None
+    assert main_app.state.active_lifespans == {}
