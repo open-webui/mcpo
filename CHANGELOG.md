@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.21] - 2026-11-25
+
+### Added
+
+* 📁 **Working Directory for Local Servers**: A local server in the config file can now set "cwd" to the folder it should start in, so servers that read files or scripts by relative path work no matter where mcpo is launched from.
+* 🔑 **API Key from an Environment Variable**: The API key can now come from the "MCPO_API_KEY" environment variable, which keeps it out of the process list; "--api-key" still works and wins when both are set.
+* 📦 **Embedded Resources, Audio and Resource Links in Tool Results**: Tools that return a file, audio or a resource link now give the model the actual content, with text as text, binary data and audio as data URLs and links as their URL, where mcpo used to return a placeholder or drop the result.
+* 📋 **Allowed Values in the OpenAPI Spec**: Tool arguments limited to a fixed set of values now list those values in the spec, so models pick a valid one, and a value outside the list gets a 422 that names the allowed values.
+* ⚠️ **Warning for --strict-auth without an API Key**: mcpo now warns at startup when "--strict-auth" is set without an API key, since the flag has no effect on its own.
+* 🛡️ **Security Policy**: The repository now has a security policy that explains the threat model and how to report a vulnerability.
+
+### Changed
+
+* 🏠 **Listens on Localhost by Default (Breaking)**: mcpo now listens on 127.0.0.1 unless "--host" is passed, so a bare-metal mcpo reached from another machine or from a Docker container such as Open WebUI now needs "--host 0.0.0.0"; the Docker image still listens on all interfaces.
+* 👤 **Docker Image Runs as a Non-Root User (Breaking)**: The image now runs mcpo and its MCP servers as the unprivileged "mcpo" user (uid 1000), OAuth tokens saved to file move from "/root/.mcpo" to "/home/mcpo/.mcpo", existing token volumes need "chown -R 1000:1000", and mounted files must be readable by uid 1000.
+* 🤫 **Tool Arguments Kept out of the Default Logs**: Tool calls are still logged, but their arguments, which can contain secrets, now only appear with "--log-level DEBUG".
+* 🔒 **Hardened Authentication and OAuth Storage**: API key and Basic auth checks now take the same time whether a guess is close or not, the OAuth token folder is readable only by the user running mcpo, and the OAuth callback page escapes the error text it shows.
+* 📌 **MCP SDK Kept Below Version 2**: mcpo now requires an MCP SDK release below 2.0, so new installs no longer pull a major version it does not support yet.
+* ⬆️ **Refreshed Dependencies**: All locked dependencies, which the Docker image installs, are on their latest releases within the supported versions, picking up upstream security fixes.
+
+### Fixed
+
+* 🐳 **Docker Image and Newer FastAPI Crashes**: The Docker image builds from the lock file again and starts, and mcpo no longer crashes at startup with newer FastAPI releases, while "--ssl-certfile" and "--ssl-keyfile" keep working.
+* 🔁 **Reconnect After an MCP Server Restart**: Tool calls now reconnect when a remote MCP server restarts or expires the session, where they used to fail until mcpo was restarted.
+* 🔌 **Tool Calls No Longer Hang on Server Errors**: A 502 or similar failure from a remote MCP server no longer leaves tool calls waiting forever, and calls work again once the server recovers.
+* 🧩 **Complex Tool Schemas Load**: Tools whose schemas use tuple-style arrays, references to other parts of the schema, types that refer to themselves or to the root, or true and false in place of a sub-schema now load, where they used to stop the server from loading.
+* 🔄 **Hot Reload Reliability**: With "--hot-reload", removed and changed servers stop answering right away, an invalid edit is rejected with the same error as at startup, a failed reload leaves every server running as before, and the old process of a changed or removed server is stopped.
+* 🔐 **Pre-Registered OAuth Clients**: A "client_id" and "client_secret" set in the OAuth client metadata are now used, where mcpo always tried dynamic client registration.
+* 🧯 **Tool Error Messages**: Errors from a tool now reach the caller with their real message, where they were reported as "Unexpected error".
+* 🛑 **Clean Shutdown**: Stopping mcpo no longer logs an error traceback, and it closes every MCP server it started.
+* 🪪 **License in Package Metadata**: The package metadata now states the MIT license.
+
 ## [0.0.20] - 2026-02-27
 
 ### Added

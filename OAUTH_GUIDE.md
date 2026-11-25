@@ -37,7 +37,7 @@ This minimal configuration allows MCPO to:
 
 ### Static Client Configuration (Legacy Servers)
 
-For servers that don't support dynamic client registration, you can specify static client metadata:
+For servers that don't support dynamic client registration, register a client with the provider and put its client ID and secret into the client metadata:
 
 ```json
 {
@@ -49,6 +49,8 @@ For servers that don't support dynamic client registration, you can specify stat
         "server_url": "http://localhost:8000",
         "storage_type": "file",
         "client_metadata": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret",
           "client_name": "My MCPO Client",
           "redirect_uris": ["http://localhost:3030/callback"],
           "grant_types": ["authorization_code", "refresh_token"],
@@ -77,6 +79,8 @@ For servers that don't support dynamic client registration, you can specify stat
 
 ### Client Metadata Fields (for static registration only)
 
+- `client_id`: ID of a client registered with the provider. When set, mcpo uses it and skips dynamic registration
+- `client_secret`: Secret of that client, if the provider issued one
 - `client_name`: Display name for your client
 - `redirect_uris`: List of allowed redirect URIs
 - `grant_types`: OAuth grant types to request (typically `["authorization_code", "refresh_token"]`)

@@ -1,110 +1,81 @@
-# ⚡️ mcpo
+<h2>mcpo</h2>
 
-Expose any MCP tool as an OpenAPI-compatible HTTP server—instantly.
+<p>mcpo is an MCP-to-OpenAPI proxy. It takes any MCP server and serves its tools as a standard OpenAPI HTTP server, with interactive docs and API key auth, so they work with <a href="https://docs.openwebui.com/features/extensibility/plugin/tools/openapi-servers/open-webui">Open WebUI</a> and any other app that speaks OpenAPI.</p>
 
-mcpo is a dead-simple proxy that takes an MCP server command and makes it accessible via standard RESTful OpenAPI, so your tools "just work" with LLM agents and apps expecting OpenAPI servers.
+![GitHub stars](https://img.shields.io/github/stars/open-webui/mcpo?style=social)
+![GitHub forks](https://img.shields.io/github/forks/open-webui/mcpo?style=social)
+[![PyPI](https://img.shields.io/pypi/v/mcpo)](https://pypi.org/project/mcpo/)
+![GitHub last commit](https://img.shields.io/github/last-commit/open-webui/mcpo?color=red)
+[![Discord](https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white)](https://discord.gg/5rJgQTnV4s)
 
-No custom protocol. No glue code. No hassle.
+[Read the docs →](https://docs.openwebui.com/features/extensibility/plugin/tools/openapi-servers/mcp)
 
-## 🤔 Why Use mcpo Instead of Native MCP?
+### Why mcpo
 
-MCP servers usually speak over raw stdio, which is:
+Most MCP servers talk over stdio and run as a local process. An app in the browser or on another machine cannot reach them. mcpo runs the MCP server for you and puts plain HTTP in front of it. Every tool gets its own endpoint, its own OpenAPI schema and live docs at `/docs`, with no glue code.
 
-- 🔓 Inherently insecure
-- ❌ Incompatible with most tools
-- 🧩 Missing standard features like docs, auth, error handling, etc.
+Open WebUI connects to Streamable HTTP MCP servers [natively](https://docs.openwebui.com/features/extensibility/mcp). Use mcpo for stdio and SSE servers, or when a client only speaks OpenAPI.
 
-mcpo solves all of that—without extra effort:
+### Installation
 
-- ✅ Works instantly with OpenAPI tools, SDKs, and UIs
-- 🛡 Adds security, stability, and scalability using trusted web standards
-- 🧠 Auto-generates interactive docs for every tool, no config needed
-- 🔌 Uses pure HTTP—no sockets, no glue code, no surprises
-
-What feels like "one more step" is really fewer steps with better outcomes.
-
-mcpo makes your AI tools usable, secure, and interoperable—right now, with zero hassle.
-
-## 🚀 Quick Usage
-
-We recommend using uv for lightning-fast startup and zero config.
+#### Python
 
 ```bash
+# With uv installed
 uvx mcpo --port 8000 --api-key "top-secret" -- your_mcp_server_command
-```
 
-Or, if you’re using Python:
-
-```bash
+# Or install and run with pip (Python 3.11+)
 pip install mcpo
 mcpo --port 8000 --api-key "top-secret" -- your_mcp_server_command
 ```
 
-To use an SSE-compatible MCP server, simply specify the server type and endpoint:
-
-```bash
-mcpo --port 8000 --api-key "top-secret" --server-type "sse" -- http://127.0.0.1:8001/sse
-```
-
-You can also provide headers for the SSE connection:
-
-```bash
-mcpo --port 8000 --api-key "top-secret" --server-type "sse" --header '{"Authorization": "Bearer token", "X-Custom-Header": "value"}' -- http://127.0.0.1:8001/sse
-```
-
-To use a Streamable HTTP-compatible MCP server, specify the server type and endpoint:
-
-```bash
-mcpo --port 8000 --api-key "top-secret" --server-type "streamable-http" -- http://127.0.0.1:8002/mcp
-```
-
-You can also run mcpo via Docker with no installation:
-
-```bash
-docker run -p 8000:8000 ghcr.io/open-webui/mcpo:main --api-key "top-secret" -- your_mcp_server_command
-```
-
-Example:
+For example, with the MCP time server:
 
 ```bash
 uvx mcpo --port 8000 --api-key "top-secret" -- uvx mcp-server-time --local-timezone=America/New_York
 ```
 
-That’s it. Your MCP tool is now available at http://localhost:8000 with a generated OpenAPI schema — test it live at [http://localhost:8000/docs](http://localhost:8000/docs).
+Then open [http://localhost:8000/docs](http://localhost:8000/docs) to try the tools live.
 
-🤝 **To integrate with Open WebUI after launching the server, check our [docs](https://docs.openwebui.com/openapi-servers/open-webui/).**
+mcpo listens on `127.0.0.1` by default. Add `--host 0.0.0.0` when Open WebUI or another client runs on a different machine or in a container.
 
-
-### 🌐 Serving Under a Subpath (`--root-path`)
-
-If you need to serve mcpo behind a reverse proxy or under a subpath (e.g., `/api/mcpo`), use the `--root-path` argument:
+#### Docker
 
 ```bash
-mcpo --port 8000 --root-path "/api/mcpo" --api-key "top-secret" -- your_mcp_server_command
+docker run -p 8000:8000 ghcr.io/open-webui/mcpo:main --api-key "top-secret" -- your_mcp_server_command
 ```
 
-All routes will be served under the specified root path, e.g. `http://localhost:8000/api/mcpo/memory`.
+The image listens on all interfaces and runs as a non-root user.
 
+#### Connect to Open WebUI
 
-### 🔄 Using a Config File
+Add the mcpo URL as a tool server in Open WebUI. See the [Open WebUI integration guide](https://docs.openwebui.com/features/extensibility/plugin/tools/openapi-servers/open-webui) for the steps.
 
-You can serve multiple MCP tools via a single config file that follows the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
+### Remote MCP Servers
 
-Enable hot-reload mode with `--hot-reload` to automatically watch your config file for changes and reload servers without downtime:
+mcpo also proxies MCP servers that already run over the network.
 
-Start via:
+```bash
+# SSE
+mcpo --port 8000 --api-key "top-secret" --server-type "sse" -- http://127.0.0.1:8001/sse
+
+# Streamable HTTP
+mcpo --port 8000 --api-key "top-secret" --server-type "streamable-http" -- http://127.0.0.1:8002/mcp
+
+# With headers for the remote server
+mcpo --port 8000 --api-key "top-secret" --server-type "sse" --header '{"Authorization": "Bearer token"}' -- http://127.0.0.1:8001/sse
+```
+
+### Config File
+
+Serve several MCP servers from one mcpo instance with a config file in the [Claude Desktop](https://modelcontextprotocol.io/quickstart/user) format.
 
 ```bash
 mcpo --config /path/to/config.json
-```
 
-Or with hot-reload enabled:
-
-```bash
+# Reload servers automatically when the file changes
 mcpo --config /path/to/config.json --hot-reload
 ```
-
-Example config.json:
 
 ```json
 {
@@ -134,15 +105,41 @@ Example config.json:
 }
 ```
 
-Each tool will be accessible under its own unique route, e.g.:
-- http://localhost:8000/memory
-- http://localhost:8000/time
+Each server gets its own route, such as `http://localhost:8000/memory` and `http://localhost:8000/time`, with its own docs at `/memory/docs` and `/time/docs`.
 
-Each with a dedicated OpenAPI schema and proxy handler. Access full schema UI at: `http://localhost:8000/<tool>/docs`  (e.g. /memory/docs, /time/docs)
+| Key | Purpose |
+| --- | --- |
+| `command`, `args` | Command that starts a local (stdio) server |
+| `env` | Extra environment variables for a local server |
+| `cwd` | Folder a local server starts in |
+| `type` | `sse` or `streamable-http` for a remote server |
+| `url`, `headers` | Address of a remote server and the headers sent to it |
+| `disabledTools` | Tools to hide from the generated API |
+| `oauth` | OAuth settings, see [OAuth](#oauth) |
 
-### 🔐 OAuth 2.1 Authentication
+### Options
 
-mcpo supports OAuth 2.1 authentication for MCP servers that require it. The implementation defaults to **dynamic client registration**, so most servers only need minimal configuration:
+| Option | Purpose |
+| --- | --- |
+| `--host`, `--port` | Address to listen on (default `127.0.0.1:8000`) |
+| `--api-key` | API key that clients send as a bearer token. Also read from `MCPO_API_KEY`, which keeps it out of the process list |
+| `--strict-auth` | Also protect the docs and OpenAPI schema with the API key |
+| `--server-type` | `stdio` (default), `sse` or `streamable-http` |
+| `--header` | Headers in JSON for a remote server |
+| `--config`, `--hot-reload` | Config file, and reload it when it changes |
+| `--env`, `--env-path` | Environment variables for the MCP server |
+| `--cors-allow-origins` | Allowed CORS origins (default `*`) |
+| `--root-path` | Serve under a subpath behind a reverse proxy, such as `/api/mcpo` |
+| `--path-prefix` | URL prefix for the server routes |
+| `--ssl-certfile`, `--ssl-keyfile` | Serve over HTTPS |
+| `--name`, `--description`, `--version` | Title, description and version shown in the docs |
+| `--log-level` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+
+Run `mcpo --help` for the full list. Setting `MCPO_API_KEY` through `--env` or `--env-path` has no effect.
+
+### OAuth
+
+mcpo supports OAuth 2.1 for Streamable HTTP servers that require it. It uses dynamic client registration by default, so most servers need only the server URL.
 
 ```json
 {
@@ -158,26 +155,28 @@ mcpo supports OAuth 2.1 authentication for MCP servers that require it. The impl
 }
 ```
 
-#### OAuth Configuration Options
+| Option | Purpose |
+| --- | --- |
+| `server_url` | OAuth server base URL (required) |
+| `storage_type` | `file` (default, persistent) or `memory` (session only) |
+| `callback_port` | Local port for the OAuth callback (default `3030`) |
+| `use_loopback` | Open the browser for sign-in automatically (default `true`) |
 
-**Basic Options:**
-- `server_url` (required): OAuth server base URL
-- `storage_type`: "file" (persistent) or "memory" (session-only, default: "file")
-- `callback_port`: Local port for OAuth callback (default: 3030)
-- `use_loopback`: Auto-open browser for auth (default: true)
+On first connection mcpo registers a client if needed, opens the browser for sign-in, captures the callback and stores the tokens in `~/.mcpo/tokens/`. Later requests reuse them.
 
-**Advanced Options (rarely needed):**
-For servers that don't support dynamic client registration, you can specify static client metadata:
+For a provider without dynamic client registration, register a client with the provider and put its client ID and secret into the client metadata.
 
 ```json
 {
   "mcpServers": {
     "legacy-oauth-server": {
-      "type": "streamable-http", 
+      "type": "streamable-http",
       "url": "http://api.example.com/mcp",
       "oauth": {
         "server_url": "http://api.example.com",
         "client_metadata": {
+          "client_id": "your-client-id",
+          "client_secret": "your-client-secret",
           "client_name": "My MCPO Client",
           "redirect_uris": ["http://localhost:3030/callback"]
         }
@@ -187,81 +186,31 @@ For servers that don't support dynamic client registration, you can specify stat
 }
 ```
 
-> **Note**: Avoid setting `scope`, `authorization_endpoint`, or `token_endpoint` in the config. These are automatically discovered from the server's OAuth metadata during the dynamic registration flow.
+Leave out `scope`, `authorization_endpoint` and `token_endpoint`. mcpo discovers them from the server's OAuth metadata. See the [OAuth guide](OAUTH_GUIDE.md) for details.
 
-On first connection, mcpo will:
-1. Perform dynamic client registration (if supported)
-2. Open your browser for authorization
-3. Capture the OAuth callback automatically  
-4. Store tokens securely (in `~/.mcpo/tokens/` for file storage)
-5. Use tokens for all subsequent requests
+### Development
 
-OAuth is supported for `streamable-http` server types. See [OAUTH_GUIDE.md](OAUTH_GUIDE.md) for detailed documentation.
+```bash
+git clone https://github.com/open-webui/mcpo.git
+cd mcpo
+uv sync --dev
 
-## 🔧 Requirements
+# Run the tests
+uv run pytest
 
-- Python 3.8+
-- uv (optional, but highly recommended for performance + packaging)
+# Run mcpo from your checkout
+uv run mcpo --port 8000 -- uvx mcp-server-time --local-timezone=America/New_York
+```
 
-## 🛠️ Development & Testing
+### Support
 
-To contribute or run tests locally:
+[Open an issue](https://github.com/open-webui/mcpo/issues) or ask on [Discord](https://discord.gg/5rJgQTnV4s).
 
-1.  **Set up the environment:**
-    ```bash
-    # Clone the repository
-    git clone https://github.com/open-webui/mcpo.git
-    cd mcpo
+### Security
 
-    # Install dependencies (including dev dependencies)
-    uv sync --dev
-    ```
+Report vulnerabilities privately through [GitHub security advisories](https://github.com/open-webui/mcpo/security/advisories/new). See [SECURITY.md](SECURITY.md) for the policy.
 
-2.  **Run tests:**
-    ```bash
-    uv run pytest
-    ```
-
-3.  **Running Locally with Active Changes:**
-
-    To run `mcpo` with your local modifications from a specific branch (e.g., `my-feature-branch`):
-
-    ```bash
-    # Ensure you are on your development branch
-    git checkout my-feature-branch
-
-    # Make your code changes in the src/mcpo directory or elsewhere
-
-    # Run mcpo using uv, which will use your local, modified code
-    # This command starts mcpo on port 8000 and proxies your_mcp_server_command
-    uv run mcpo --port 8000 -- your_mcp_server_command
-
-    # Example with a test MCP server (like mcp-server-time):
-    # uv run mcpo --port 8000 -- uvx mcp-server-time --local-timezone=America/New_York
-    ```
-    This allows you to test your changes interactively before committing or creating a pull request. Access your locally running `mcpo` instance at `http://localhost:8000` and the auto-generated docs at `http://localhost:8000/docs`.
-
-
-## 🪪 License
-
-MIT
-
-## 🤝 Contributing
-
-We welcome and strongly encourage contributions from the community!
-
-Whether you're fixing a bug, adding features, improving documentation, or just sharing ideas—your input is incredibly valuable and helps make mcpo better for everyone.
-
-Getting started is easy:
-
-- Fork the repo
-- Create a new branch
-- Make your changes
-- Open a pull request
-
-Not sure where to start? Feel free to open an issue or ask a question—we’re happy to help you find a good first task.
-
-## ✨ Star History
+### Star History
 
 <a href="https://star-history.com/#open-webui/mcpo&Date">
   <picture>
@@ -271,6 +220,8 @@ Not sure where to start? Feel free to open an issue or ask a question—we’re 
   </picture>
 </a>
 
----
+#### License
 
-✨ Let's build the future of interoperable AI tooling together!
+MIT. See [LICENSE](./LICENSE).
+
+Created by [Timothy Jaeryang Baek](https://github.com/tjbck).

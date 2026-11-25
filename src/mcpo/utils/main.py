@@ -1,7 +1,7 @@
 import logging
 import json
 import traceback
-from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
+from typing import Any, Dict, ForwardRef, List, Literal, Optional, Type, Union
 
 from anyio import ClosedResourceError
 from fastapi import HTTPException, Request
@@ -34,6 +34,25 @@ MCP_ERROR_TO_HTTP_STATUS = {
 logger = logging.getLogger(__name__)
 
 
+# python-sdk's StreamableHTTPTransport synthesizes this exact error on ANY
+# HTTP 404 response, discarding whatever JSON-RPC error body the server sent
+# (see _send_session_terminated_error in mcp/client/streamable_http.py). Note
+# it hardcodes a bare positive 32600, not the negative -32600 that
+# mcp.types.INVALID_REQUEST holds per the JSON-RPC spec — matching against
+# INVALID_REQUEST here would never fire.
+_SESSION_TERMINATED_CODE = 32600
+_SESSION_TERMINATED_MESSAGE = "Session terminated"
+
+
+def _is_session_terminated(exc: McpError) -> bool:
+    """True only for the client-synthesized 404-on-existing-session signal —
+    never a real tool-level or server-originated JSON-RPC error."""
+    return (
+        exc.error.code == _SESSION_TERMINATED_CODE
+        and exc.error.message == _SESSION_TERMINATED_MESSAGE
+    )
+
+
 def normalize_server_type(server_type: str) -> str:
     """Normalize server_type to a standard value."""
     if server_type in ["streamable_http", "streamablehttp", "streamable-http"]:
@@ -56,9 +75,18 @@ def process_tool_response(result: CallToolResult) -> list:
         elif isinstance(content, types.ImageContent):
             image_data = f"data:{content.mimeType};base64,{content.data}"
             response.append(image_data)
+        elif isinstance(content, types.AudioContent):
+            audio_data = f"data:{content.mimeType};base64,{content.data}"
+            response.append(audio_data)
+        elif isinstance(content, types.ResourceLink):
+            response.append(str(content.uri))
         elif isinstance(content, types.EmbeddedResource):
-            # TODO: Handle embedded resources
-            response.append("Embedded resource not supported yet.")
+            resource = content.resource
+            if isinstance(resource, types.TextResourceContents):
+                response.append(resource.text)
+            else:
+                mime_type = resource.mimeType or "application/octet-stream"
+                response.append(f"data:{mime_type};base64,{resource.blob}")
     return response
 
 
@@ -95,6 +123,7 @@ def _process_schema_property(
     prop_name: str,
     is_required: bool,
     schema_defs: Optional[Dict] = None,
+    resolving_refs: tuple[str, ...] = (),
 ) -> tuple[Union[Type, List, ForwardRef, Any], FieldInfo]:
     """
     Recursively processes a schema property to determine its Python type hint
@@ -104,7 +133,7 @@ def _process_schema_property(
         A tuple containing (python_type_hint, pydantic_field).
         The pydantic_field contains default value and description.
     """
-    if "$ref" in prop_schema:
+    if isinstance(prop_schema, dict) and "$ref" in prop_schema:
         ref = prop_schema["$ref"]
         if ref.startswith("#/properties/"):
             # Remove common prefix in pathes.
@@ -119,15 +148,30 @@ def _process_schema_property(
             if prefix_path.startswith(ref_path):
                 # TODO: Find the exact type hint for the $ref.
                 return Any, Field(default=None, description="")
-        ref = ref.split("/")[-1]
-        assert ref in schema_defs, "Custom field not found"
-        prop_schema = schema_defs[ref]
+        # "#" is the root schema, which is always being resolved
+        if ref == "#" or ref in resolving_refs:
+            return Any, Field(default=None, description="")
+        resolving_refs += (ref,)
+        prop_schema = schema_defs
+        for part in ref.removeprefix("#/").split("/"):
+            if isinstance(prop_schema, list):
+                part = int(part)
+            prop_schema = prop_schema[part]
+
+    if isinstance(prop_schema, bool):
+        prop_schema = {}
 
     prop_type = prop_schema.get("type")
     prop_desc = prop_schema.get("description", "")
 
     default_value = ... if is_required else prop_schema.get("default", None)
     pydantic_field = Field(default=default_value, description=prop_desc)
+
+    if "const" in prop_schema:
+        return Literal[prop_schema["const"]], pydantic_field
+
+    if prop_schema.get("enum"):
+        return Literal[tuple(prop_schema["enum"])], pydantic_field
 
     # Handle the case where prop_type is missing but 'anyOf' key exists
     # In this case, use data type from 'anyOf' to determine the type hint
@@ -141,6 +185,7 @@ def _process_schema_property(
                 f"choice_{i}",
                 False,
                 schema_defs=schema_defs,
+                resolving_refs=resolving_refs,
             )
             type_hints.append(type_hint)
         return Union[tuple(type_hints)], pydantic_field
@@ -160,6 +205,7 @@ def _process_schema_property(
                 prop_name,
                 False,
                 schema_defs=schema_defs,
+                resolving_refs=resolving_refs,
             )
             type_hints.append(type_hint)
 
@@ -187,6 +233,7 @@ def _process_schema_property(
                 name,
                 is_nested_required,
                 schema_defs,
+                resolving_refs,
             )
 
             if name_needs_alias(name):
@@ -213,7 +260,7 @@ def _process_schema_property(
 
     elif prop_type == "array":
         items_schema = prop_schema.get("items")
-        if not items_schema:
+        if not isinstance(items_schema, dict):
             # Default to list of anything if items schema is missing
             return List[Any], pydantic_field
 
@@ -225,6 +272,7 @@ def _process_schema_property(
             "item",
             False,  # Items aren't required at this level,
             schema_defs,
+            resolving_refs,
         )
         list_type_hint = List[item_type_hint]
         return list_type_hint, pydantic_field
@@ -288,7 +336,10 @@ def get_tool_handler(
         session_manager = getattr(request.app.state, "session_manager", None)
 
         async def _invoke(session):
-            return await session.call_tool(endpoint_name, arguments=arguments)
+            operation = session.call_tool(endpoint_name, arguments=arguments)
+            if session_manager:
+                return await session_manager.run_session_operation(operation)
+            return await operation
 
         if session_manager:
             try:
@@ -303,9 +354,11 @@ def get_tool_handler(
 
             try:
                 return await _invoke(session)
-            except ClosedResourceError:
+            except (ClosedResourceError, McpError) as e:
+                if isinstance(e, McpError) and not _is_session_terminated(e):
+                    raise
                 logger.warning(
-                    "Session closed during call to '%s'; attempting reconnect",
+                    "Session closed/terminated during call to '%s'; attempting reconnect",
                     endpoint_name,
                 )
                 session, _ = await session_manager.reconnect()
@@ -347,7 +400,8 @@ def get_tool_handler(
             if forwarded_headers:
                 meta["headers"] = forwarded_headers
 
-            logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
+            logger.info("Calling endpoint: %s", endpoint_name)
+            logger.debug("Arguments for %s: %s", endpoint_name, args)
             try:
                 result = await call_tool_with_reconnect(request, args)
 
@@ -369,6 +423,8 @@ def get_tool_handler(
                 )
                 return final_response
 
+            except HTTPException:
+                raise
             except McpError as e:
                 logger.info(
                     f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
@@ -424,6 +480,8 @@ def get_tool_handler(
             )
             return final_response
 
+        except HTTPException:
+            raise
         except McpError as e:
             logger.info(
                 f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"

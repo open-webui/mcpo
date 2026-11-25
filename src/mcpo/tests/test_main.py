@@ -1,6 +1,6 @@
 import pytest
 from pydantic import BaseModel, Field
-from typing import Any, List, Dict, Union
+from typing import Any, List, Literal, Dict, Union
 
 from mcpo.utils.main import _process_schema_property
 
@@ -306,7 +306,7 @@ def test_multi_type_property_with_any_of():
     assert len(result_type.__args__) == 3
     assert len(result_type.__args__[0].model_fields) == 2
     assert len(result_type.__args__[1].model_fields) == 1
-    assert result_type.__args__[2] is str
+    assert result_type.__args__[2] == Literal["auto", "none"]
 
     # assert result_field parameter config
     assert result_field.description == "A property with multiple types"

@@ -27,16 +27,20 @@ RUN uv venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install mcpo (assuming pyproject.toml is properly configured)
-RUN uv pip install . && rm -rf ~/.cache
+RUN uv sync --frozen --no-dev && rm -rf ~/.cache
 
 # Verify mcpo installed correctly
 RUN which mcpo
+
+# Run as an unprivileged user
+RUN useradd --create-home --uid 1000 mcpo && install -d -o mcpo -g mcpo /home/mcpo/.mcpo
+USER 1000
 
 # Expose port (optional but common default)
 EXPOSE 8000
 
 # Entrypoint set for easy container invocation
-ENTRYPOINT ["mcpo"]
+ENTRYPOINT ["mcpo", "--host", "0.0.0.0"]
 
 # Default help CMD (can override at runtime)
 CMD ["--help"]
